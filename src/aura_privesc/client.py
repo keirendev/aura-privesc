@@ -66,6 +66,8 @@ class AuraClient:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Accept": "*/*",
                 "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "Origin": self.base_url,
+                "Referer": self.base_url + "/s/",
             },
             **transport_kwargs,
         )
@@ -124,6 +126,7 @@ class AuraClient:
             data = {
                 "message": self._build_message([action]),
                 "aura.context": self._build_context(),
+                "aura.pageURI": "/s/",
                 "aura.token": self.aura_token,
             }
 
@@ -208,6 +211,24 @@ class AuraClient:
         descriptor = f"apex://{controller}/ACTION${method}"
         return await self.request(descriptor, params)
 
+    async def call_apex_execute(
+        self,
+        controller: str,
+        method: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Call Apex via the canonical ApexActionController/execute format."""
+        descriptor = "aura://ApexActionController/ACTION$execute"
+        wrapped_params = {
+            "namespace": "",
+            "classname": controller,
+            "method": method,
+            "params": params or {},
+            "cacheable": False,
+            "isContinuation": False,
+        }
+        return await self.request(descriptor, wrapped_params)
+
     async def probe(self, url: str) -> httpx.Response | None:
         """Send a lightweight probe POST to check if endpoint is valid."""
         try:
@@ -215,6 +236,7 @@ class AuraClient:
             data = {
                 "message": self._build_message([action]),
                 "aura.context": self._build_context(),
+                "aura.pageURI": "/s/",
                 "aura.token": self.aura_token,
             }
             resp = await self._http.post(url, data=data)

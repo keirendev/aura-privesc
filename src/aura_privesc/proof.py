@@ -37,7 +37,7 @@ def generate_curl(
         separators=(",", ":"),
     )
 
-    body = f"message={message}&aura.context={context}&aura.token={token}"
+    body = f"message={message}&aura.context={context}&aura.pageURI=/s/&aura.token={token}"
 
     flags = ""
     if proxy:
@@ -85,12 +85,20 @@ def proof_for_records(client: AuraClient, object_name: str) -> str:
 
 
 def proof_for_apex(client: AuraClient, controller: str, method: str) -> str:
-    """Generate an apex:// curl command for an Apex finding."""
-    descriptor = f"apex://{controller}/ACTION${method}"
+    """Generate an ApexActionController/execute curl command for an Apex finding."""
+    descriptor = "aura://ApexActionController/ACTION$execute"
+    params = {
+        "namespace": "",
+        "classname": controller,
+        "method": method,
+        "params": {},
+        "cacheable": False,
+        "isContinuation": False,
+    }
     return generate_curl(
         aura_url=client.aura_url,
         descriptor=descriptor,
-        params={},
+        params=params,
         token=client.aura_token,
         context=client._build_context(),
         proxy=client.proxy,

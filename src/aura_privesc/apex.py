@@ -31,6 +31,13 @@ async def discover_apex_from_js(client: AuraClient, base_url: str) -> list[str]:
                 controller = match.group(1)
                 method = match.group(2)
                 found.add(f"{controller}.{method}")
+            # Match classname/method from ApexActionController execute calls
+            for match in re.finditer(
+                r'"classname"\s*:\s*"(\w+)"[^}]*"method"\s*:\s*"(\w+)"', content
+            ):
+                controller = match.group(1)
+                method = match.group(2)
+                found.add(f"{controller}.{method}")
         except Exception as e:
             logger.debug("Error scanning JS file %s: %s", url, e)
 
@@ -79,7 +86,7 @@ async def test_apex_method(
     controller, method = parts
 
     try:
-        resp = await client.call_apex(controller, method)
+        resp = await client.call_apex_execute(controller, method)
         result = _classify_apex_response(controller_method, resp)
     except Exception as e:
         msg = str(e)
