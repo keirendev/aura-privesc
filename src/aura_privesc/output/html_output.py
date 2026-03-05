@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -44,6 +45,27 @@ tr:hover{background:#1a1a3e}
 .stat-number{font-size:2rem;font-weight:700;color:var(--cyan)}
 .stat-label{color:var(--muted);font-size:.9rem}
 footer{text-align:center;color:var(--muted);margin-top:3rem;padding-top:1rem;border-top:1px solid var(--border);font-size:.85rem}
+tr.obj-row{cursor:pointer}
+tr.obj-row:hover td:first-child{text-decoration:underline}
+tr.expand-row{display:none;background:var(--bg)}
+tr.expand-row.open{display:table-row}
+tr.expand-row>td{padding:1rem 1.5rem}
+.records-table{width:100%;border-collapse:collapse;margin:.5rem 0;font-size:.85rem}
+.records-table th{background:#0d2137;font-size:.8rem;padding:.4rem .6rem}
+.records-table td{padding:.3rem .6rem;border-bottom:1px solid var(--border);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn{display:inline-block;padding:4px 12px;border:none;border-radius:4px;font-size:.8rem;font-weight:600;cursor:pointer;margin:2px;color:#fff;text-decoration:none}
+.btn-info{background:var(--cyan)}
+.btn-read{background:#1565c0}
+.btn-create{background:var(--green);color:#000}
+.btn-update{background:var(--yellow);color:#000}
+.btn-delete{background:var(--red)}
+.btn-fire{background:var(--purple)}
+.btn:hover{opacity:.85}
+.action-bar{margin-top:.5rem}
+.toast{visibility:hidden;min-width:200px;background:#333;color:#fff;text-align:center;border-radius:6px;padding:10px 24px;position:fixed;bottom:30px;left:50%;transform:translateX(-50%);font-size:.9rem;z-index:9999}
+.toast.show{visibility:visible;animation:fadein .3s,fadeout .3s 1.7s}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+@keyframes fadeout{from{opacity:1}to{opacity:0}}
 """
 
 _JS = """\
@@ -57,8 +79,17 @@ document.addEventListener('DOMContentLoaded',function(){
       var q=this.value.toLowerCase();
       var rows=table.querySelectorAll('tbody tr');
       rows.forEach(function(row){
+        if(row.classList.contains('expand-row')){
+          if(!q)row.classList.remove('open');
+          return;
+        }
         var text=row.textContent.toLowerCase();
-        row.style.display=text.indexOf(q)!==-1?'':'none';
+        var show=text.indexOf(q)!==-1;
+        row.style.display=show?'':'none';
+        var next=row.nextElementSibling;
+        if(next&&next.classList.contains('expand-row')&&!show){
+          next.classList.remove('open');
+        }
       });
     });
   });
@@ -68,29 +99,65 @@ document.addEventListener('DOMContentLoaded',function(){
     th.addEventListener('click',function(){
       var table=th.closest('table');
       var tbody=table.querySelector('tbody');
-      var rows=Array.from(tbody.querySelectorAll('tr'));
       var idx=Array.from(th.parentNode.children).indexOf(th);
       var type=th.getAttribute('data-sort');
       var asc=!th.classList.contains('sorted-asc');
-
-      /* reset all headers in this table */
       th.parentNode.querySelectorAll('th').forEach(function(h){h.classList.remove('sorted-asc','sorted-desc');});
       th.classList.add(asc?'sorted-asc':'sorted-desc');
-
-      rows.sort(function(a,b){
-        var va=a.children[idx].getAttribute('data-val')||a.children[idx].textContent.trim();
-        var vb=b.children[idx].getAttribute('data-val')||b.children[idx].textContent.trim();
+      /* collect row pairs (obj-row + expand-row) */
+      var pairs=[];
+      var rows=Array.from(tbody.children);
+      for(var i=0;i<rows.length;i++){
+        if(!rows[i].classList.contains('expand-row')){
+          var pair=[rows[i]];
+          if(i+1<rows.length&&rows[i+1].classList.contains('expand-row'))pair.push(rows[i+1]);
+          pairs.push(pair);
+        }
+      }
+      pairs.sort(function(a,b){
+        var va=a[0].children[idx].getAttribute('data-val')||a[0].children[idx].textContent.trim();
+        var vb=b[0].children[idx].getAttribute('data-val')||b[0].children[idx].textContent.trim();
         if(type==='num'){va=parseFloat(va)||0;vb=parseFloat(vb)||0;}
         else{va=va.toLowerCase();vb=vb.toLowerCase();}
         if(va<vb)return asc?-1:1;
         if(va>vb)return asc?1:-1;
         return 0;
       });
+      pairs.forEach(function(pair){pair.forEach(function(r){tbody.appendChild(r);});});
+    });
+  });
 
-      rows.forEach(function(row){tbody.appendChild(row);});
+  /* --- Expand/collapse object rows --- */
+  document.querySelectorAll('tr.obj-row').forEach(function(row){
+    row.addEventListener('click',function(e){
+      if(e.target.closest('.btn'))return;
+      var next=row.nextElementSibling;
+      if(next&&next.classList.contains('expand-row'))next.classList.toggle('open');
     });
   });
 });
+
+/* --- Build curl command and copy to clipboard --- */
+function fireAura(descriptor,params){
+  if(typeof AURA==='undefined')return;
+  var msg=JSON.stringify({actions:[{id:'0',descriptor:descriptor,callingDescriptor:'UNKNOWN',params:params}]});
+  var body='message='+encodeURIComponent(msg)+'&aura.context='+encodeURIComponent(AURA.context)+'&aura.pageURI=/s/&aura.token='+encodeURIComponent(AURA.token);
+  var cmd="curl -k --proxy http://127.0.0.1:8080 -X POST '"+AURA.url+"' -H 'Content-Type: application/x-www-form-urlencoded'";
+  if(AURA.sid)cmd+=" -H 'Cookie: sid="+AURA.sid+"'";
+  cmd+=" -d '"+body.replace(/'/g,"'\\''")+"' | python3 -m json.tool";
+  navigator.clipboard.writeText(cmd).then(function(){
+    showToast('Copied curl to clipboard');
+  },function(){
+    /* fallback: prompt */
+    prompt('Copy this curl command:',cmd);
+  });
+}
+function showToast(msg){
+  var el=document.getElementById('toast');
+  if(!el){el=document.createElement('div');el.id='toast';document.body.appendChild(el);}
+  el.textContent=msg;el.className='toast show';
+  setTimeout(function(){el.className='toast';},2000);
+}
 """
 
 _CHECK = "\u2713"
@@ -143,6 +210,99 @@ def _build_summary(result: ScanResult, accessible_objects: list, callable_apex: 
 """
 
 
+def _build_records_subtable(records: list[dict]) -> str:
+    """Build a nested table showing sample records."""
+    if not records:
+        return '<p style="color:var(--muted);font-size:.85rem">No sample records.</p>'
+    # Collect all field names across records
+    fields: list[str] = []
+    seen: set[str] = set()
+    for rec in records:
+        for k in rec:
+            if k not in seen:
+                seen.add(k)
+                fields.append(k)
+    header = "".join(f"<th>{_esc(f)}</th>" for f in fields)
+    body = ""
+    for rec in records:
+        cells = "".join(
+            f"<td title=\"{_esc(str(rec.get(f, '')))}\">{_esc(str(rec.get(f, '')))}</td>"
+            for f in fields
+        )
+        body += f"<tr>{cells}</tr>"
+    return f'<table class="records-table"><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>'
+
+
+def _build_action_buttons(obj) -> str:
+    """Build Aura action buttons for an object row."""
+    name = obj.name
+    esc_name = _esc(name)
+    js_name = html.escape(json.dumps(name), quote=True)
+
+    # getObjectInfo
+    btns = (
+        f'<button class="btn btn-info" '
+        f"""onclick="fireAura('aura://RecordUiController/ACTION$getObjectInfo',"""
+        f"""{{'objectApiName':{js_name}}})">getObjectInfo</button>"""
+    )
+
+    # getItems
+    get_items_desc = html.escape(
+        "serviceComponent://ui.force.components.controllers.lists."
+        "selectableListDataProvider.SelectableListDataProviderController"
+        "/ACTION$getItems",
+        quote=True,
+    )
+    btns += (
+        f'<button class="btn btn-read" '
+        f"""onclick="fireAura('{get_items_desc}',"""
+        f"""{{'entityNameOrId':{js_name},'listViewApiName':null,'getCount':true,'pageSize':10}})">getItems</button>"""
+    )
+
+    # Create
+    create_desc = html.escape(
+        "serviceComponent://ui.force.components.controllers.recordGlobalValueProvider."
+        "RecordGvpController/ACTION$createRecord",
+        quote=True,
+    )
+    btns += (
+        f'<button class="btn btn-create" '
+        f"""onclick="fireAura('{create_desc}',"""
+        f"""{{'objectApiName':{js_name},'fields':{{'Name':'aura-privesc-test'}}}})">Create</button>"""
+    )
+
+    # Update / Delete — use first sample record ID if available
+    first_id = ""
+    if obj.sample_records:
+        first_rec = obj.sample_records[0]
+        first_id = str(first_rec.get("Id") or first_rec.get("id") or "")
+    js_id = html.escape(json.dumps(first_id or "RECORD_ID_HERE"), quote=True)
+
+    update_desc = html.escape(
+        "serviceComponent://ui.force.components.controllers.recordGlobalValueProvider."
+        "RecordGvpController/ACTION$updateRecord",
+        quote=True,
+    )
+    btns += (
+        f'<button class="btn btn-update" '
+        f"""onclick="fireAura('{update_desc}',"""
+        f"""{{'recordId':{js_id},'fields':{{'Name':'aura-privesc-updated'}}}})">Update</button>"""
+    )
+
+    delete_desc = html.escape(
+        "serviceComponent://ui.force.components.controllers.recordGlobalValueProvider."
+        "RecordGvpController/ACTION$deleteRecord",
+        quote=True,
+    )
+    btns += (
+        f'<button class="btn btn-delete" '
+        f"""onclick="fireAura('{delete_desc}',"""
+        f"""{{'recordId':{js_id}}})">Delete</button>"""
+    )
+
+    return f'<div class="action-bar">{btns}</div>'
+
+
 def _build_objects_table(accessible_objects: list) -> str:
     if not accessible_objects:
         return "<h2>Object Findings</h2><p>No accessible objects found.</p>"
@@ -151,11 +311,12 @@ def _build_objects_table(accessible_objects: list) -> str:
     accessible_objects.sort(key=lambda o: (risk_order.get(o.risk, 99), o.name))
 
     rows = ""
+    ncols = 8
     for obj in accessible_objects:
         c = obj.crud
         count = str(obj.record_count) if obj.record_count is not None else "-"
         risk_val = risk_order.get(obj.risk, 99)
-        rows += f"""<tr>
+        rows += f"""<tr class="obj-row">
   <td>{_esc(obj.name)}</td>
   <td>{_check_or_cross(c.readable)}</td>
   <td>{_check_or_cross(c.createable)}</td>
@@ -164,7 +325,11 @@ def _build_objects_table(accessible_objects: list) -> str:
   <td>{_check_or_cross(c.queryable)}</td>
   <td data-val="{count}">{count}</td>
   <td data-val="{risk_val}">{_badge(obj.risk)}</td>
-</tr>"""
+</tr>
+<tr class="expand-row"><td colspan="{ncols}">
+{_build_records_subtable(obj.sample_records)}
+{_build_action_buttons(obj)}
+</td></tr>"""
 
     return f"""
 <h2>Object Findings ({len(accessible_objects)})</h2>
@@ -232,10 +397,22 @@ def _build_apex_table(callable_apex: list) -> str:
 
     rows = ""
     for r in callable_apex:
+        parts = r.controller_method.split(".", 1)
+        controller = parts[0] if parts else ""
+        method = parts[1] if len(parts) > 1 else ""
+        js_ctrl = html.escape(json.dumps(controller), quote=True)
+        js_meth = html.escape(json.dumps(method), quote=True)
+        fire_btn = (
+            f'<button class="btn btn-fire" '
+            f"""onclick="fireAura('aura://ApexActionController/ACTION$execute',"""
+            f"""{{'namespace':'','classname':{js_ctrl},'method':{js_meth},"""
+            f"""'params':{{}},'cacheable':false,'isContinuation':false}})">Fire</button>"""
+        )
         rows += f"""<tr>
   <td>{_esc(r.controller_method)}</td>
   <td><span class="status-callable">CALLABLE</span></td>
   <td>{_esc(r.message or '')}</td>
+  <td>{fire_btn}</td>
 </tr>"""
 
     return f"""
@@ -248,6 +425,7 @@ def _build_apex_table(callable_apex: list) -> str:
   <th data-sort="str">Controller.Method<span class="sort-arrow"></span></th>
   <th>Status</th>
   <th data-sort="str">Message<span class="sort-arrow"></span></th>
+  <th>Action</th>
 </tr>
 </thead>
 <tbody>
@@ -305,6 +483,18 @@ def write_report(
         _build_footer(timestamp),
     ])
 
+    # Build AURA connection config for interactive buttons
+    aura_config = ""
+    if result.aura_url:
+        aura_obj = {
+            "url": result.aura_url,
+            "token": result.aura_token or "undefined",
+            "context": result.aura_context or "{}",
+        }
+        if result.sid:
+            aura_obj["sid"] = result.sid
+        aura_config = f"var AURA={json.dumps(aura_obj)};\n"
+
     doc = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -317,7 +507,8 @@ def write_report(
 <div class="container">
 {body}
 </div>
-<script>{_JS}</script>
+<script>
+{aura_config}{_JS}</script>
 </body>
 </html>
 """

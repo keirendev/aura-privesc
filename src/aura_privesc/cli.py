@@ -42,8 +42,7 @@ def main():
 
 @main.command()
 @click.option("-u", "--url", required=True, help="Target Salesforce base/community URL")
-@click.option("-t", "--token", default=None, help="Aura token (omit for guest mode)")
-@click.option("--sid", default=None, help="Salesforce session ID cookie for authenticated scans")
+@click.option("--authenticated", is_flag=True, help="Authenticated scan mode (prompts for sid and token)")
 @click.option("--context", "manual_context", default=None, help="Manual aura.context JSON")
 @click.option("--endpoint", "manual_endpoint", default=None, help="Manual aura endpoint path")
 @click.option("--objects-file", type=click.Path(exists=True), help="File with additional object API names")
@@ -64,8 +63,7 @@ def main():
 @click.option("--report-dir", type=click.Path(file_okay=False), default=".", help="Directory for HTML report output")
 def scan(
     url: str,
-    token: str | None,
-    sid: str | None,
+    authenticated: bool,
     manual_context: str | None,
     manual_endpoint: str | None,
     objects_file: str | None,
@@ -89,6 +87,16 @@ def scan(
     if interactive and json_mode:
         console.print("[red]Error:[/red] --interactive and --json cannot be used together.")
         sys.exit(1)
+
+    # Prompt for credentials when running in authenticated mode
+    sid: str | None = None
+    token: str | None = None
+    if authenticated:
+        sid = console.input("[cyan]Session ID (sid):[/cyan] ").strip() or None
+        token = console.input("[cyan]Aura token:[/cyan] ").strip() or None
+        if not sid and not token:
+            console.print("[red]Error:[/red] --authenticated requires at least a sid or token.")
+            sys.exit(1)
 
     if verbose:
         logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
@@ -253,6 +261,10 @@ async def _run(
                 manual_context=manual_context,
             )
             result.discovery = discovery
+            result.aura_url = client.aura_url
+            result.aura_token = client.aura_token
+            result.aura_context = client._build_context()
+            result.sid = client.sid
         except DiscoveryError as e:
             if json_mode:
                 result.discovery = None

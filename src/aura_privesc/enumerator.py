@@ -85,7 +85,15 @@ def _parse_object_info(name: str, resp: dict[str, Any]) -> ObjectResult:
 
 
 async def get_record_count(client: AuraClient, object_name: str) -> int | None:
-    """Call getItems with getCount=true to retrieve record count."""
+    """Call getItems with getCount=true to retrieve record count (legacy wrapper)."""
+    count, _ = await get_records(client, object_name)
+    return count
+
+
+async def get_records(
+    client: AuraClient, object_name: str,
+) -> tuple[int | None, list[dict]]:
+    """Call getItems to retrieve record count and up to 10 sample records."""
     try:
         resp = await client.request(
             DESCRIPTORS["getItems"],
@@ -93,7 +101,7 @@ async def get_record_count(client: AuraClient, object_name: str) -> int | None:
                 "entityNameOrId": object_name,
                 "listViewApiName": None,
                 "getCount": True,
-                "pageSize": 0,
+                "pageSize": 10,
             },
         )
         actions = resp.get("actions", [])
@@ -103,10 +111,12 @@ async def get_record_count(client: AuraClient, object_name: str) -> int | None:
             if count is None:
                 count = rv.get("totalCount")
             if count is not None:
-                return int(count)
+                count = int(count)
+            records = rv.get("records", [])
+            return count, records
     except Exception as e:
-        logger.debug("getItems count failed for %s: %s", object_name, e)
-    return None
+        logger.debug("getItems failed for %s: %s", object_name, e)
+    return None, []
 
 
 async def enumerate_object(
@@ -124,8 +134,9 @@ async def enumerate_object(
         result = await get_object_info(client, object_name)
 
     if result.accessible and not skip_records:
-        count = await get_record_count(client, object_name)
+        count, records = await get_records(client, object_name)
         result.record_count = count
+        result.sample_records = records
 
     if result.accessible:
         result.proof = proof_for_object(client, object_name)

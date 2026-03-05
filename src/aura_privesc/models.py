@@ -59,6 +59,7 @@ class ObjectResult(BaseModel):
     accessible: bool = False
     crud: CrudPermissions = CrudPermissions()
     record_count: int | None = None
+    sample_records: list[dict] = []
     risk: RiskLevel = RiskLevel.INFO
     error: str | None = None
     proof: str | None = None
@@ -107,6 +108,10 @@ class ScanResult(BaseModel):
     objects: list[ObjectResult] = []
     apex_results: list[ApexResult] = []
     interactive_mode: bool = False
+    aura_url: str | None = None
+    aura_token: str | None = None
+    aura_context: str | None = None
+    sid: str | None = None
 
     @property
     def accessible_objects(self) -> list[ObjectResult]:
