@@ -48,9 +48,12 @@ async def check_soql_capability(client: AuraClient) -> bool:
             DESCRIPTORS["getItems"],
             {
                 "entityNameOrId": "Account",
-                "listViewApiName": None,
-                "getCount": True,
+                "layoutType": "FULL",
                 "pageSize": 0,
+                "currentPage": 0,
+                "useTimeout": False,
+                "getCount": False,
+                "enableRowActions": False,
             },
         )
         actions = resp.get("actions", [])

@@ -59,9 +59,18 @@ class AuraClient:
         if insecure:
             transport_kwargs["verify"] = False
 
+        # Enable HTTP/2 so proxies (e.g. Burp) can speak HTTP/2 natively
+        # instead of badly converting HTTP/2 responses to HTTP/1.1.
+        try:
+            import h2  # noqa: F401
+            http2_available = True
+        except ImportError:
+            http2_available = False
+
         self._http = httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=True,
+            http2=http2_available,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Accept": "*/*",
@@ -95,26 +104,29 @@ class AuraClient:
         return json.dumps(ctx)
 
     def _build_message(self, actions: list[dict[str, Any]]) -> str:
-        return json.dumps({"actions": actions})
+        return json.dumps({"actions": actions}, separators=(",", ":"))
 
     @staticmethod
     def _encode_form(fields: dict[str, str]) -> str:
-        """Build an x-www-form-urlencoded body with exact control over encoding.
+        """Build an x-www-form-urlencoded body matching real Aura protocol.
 
-        Uses quote() with safe='' so every special character is percent-encoded
-        exactly once — avoids the double-encoding that httpx's data= causes when
-        values already contain percent-encoded sequences.
+        The ``message`` field is sent as raw compact JSON (not percent-encoded),
+        matching how the Salesforce Aura framework constructs requests.
+        All other values are percent-encoded with quote(safe='').
         """
         parts = []
         for k, v in fields.items():
-            parts.append(f"{quote(k, safe='')}={quote(v, safe='')}")
+            if k == "message":
+                parts.append(f"{k}={v}")
+            else:
+                parts.append(f"{quote(k, safe='')}={quote(v, safe='')}")
         return "&".join(parts)
 
     def _build_action(
         self,
         descriptor: str,
         params: dict[str, Any] | None = None,
-        action_id: str = "0",
+        action_id: str = "123;a",
     ) -> dict[str, Any]:
         return {
             "id": action_id,
@@ -181,7 +193,7 @@ class AuraClient:
 
             # Check for Aura-level errors
             if isinstance(body, dict):
-                # aura:clientOutOfSync
+                # aura:clientOutOfSync — exceptionEvent format
                 if body.get("exceptionEvent"):
                     desc = body.get("event", {}).get("descriptor", "")
                     if "clientOutOfSync" in desc and retry_sync:
@@ -195,6 +207,25 @@ class AuraClient:
 
                     if "invalidSession" in desc:
                         raise InvalidSessionError("Aura session is invalid or expired")
+
+                # clientOutOfSync — coos format (fwuid in response context)
+                if retry_sync:
+                    actions = body.get("actions", [])
+                    has_coos = any(
+                        isinstance(a, dict) and "coos" in a for a in actions
+                    )
+                    if has_coos:
+                        resp_ctx = body.get("context", {})
+                        new_fwuid = resp_ctx.get("fwuid") if isinstance(resp_ctx, dict) else None
+                        if new_fwuid and new_fwuid != self.fwuid:
+                            logger.debug("coos recovery: updating fwuid from response context")
+                            self.fwuid = new_fwuid
+                            return await self.request(descriptor, params, retry_sync=False)
+
+                # Keep fwuid fresh from any response context
+                resp_ctx = body.get("context", {})
+                if isinstance(resp_ctx, dict) and resp_ctx.get("fwuid"):
+                    self.fwuid = resp_ctx["fwuid"]
 
             return body
 

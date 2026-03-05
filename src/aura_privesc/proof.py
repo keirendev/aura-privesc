@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from .client import AuraClient
@@ -19,13 +20,15 @@ def generate_curl(
     context: str,
     *,
     sid: str | None = None,
+    proxy: str | None = None,
+    insecure: bool = False,
 ) -> str:
     """Build a ready-to-paste curl command that reproduces an Aura request."""
     message = json.dumps(
         {
             "actions": [
                 {
-                    "id": "0",
+                    "id": "123;a",
                     "descriptor": descriptor,
                     "callingDescriptor": "UNKNOWN",
                     "params": params,
@@ -35,10 +38,15 @@ def generate_curl(
         separators=(",", ":"),
     )
 
-    body = f"message={message}&aura.context={context}&aura.pageURI=/s/&aura.token={token}"
+    ctx_encoded = quote(context, safe='')
+    token_encoded = quote(token, safe='')
+    body = f"message={message}&aura.context={ctx_encoded}&aura.pageURI=/s/&aura.token={token_encoded}"
 
-    flags = " -k --proxy http://127.0.0.1:8080"
-
+    flags = ""
+    if insecure:
+        flags += " -k"
+    if proxy:
+        flags += f" --proxy {proxy}"
     if sid:
         flags += f" -H 'Cookie: sid={sid}'"
 
@@ -54,6 +62,8 @@ def proof_for_object(client: AuraClient, object_name: str) -> str:
         token=client.aura_token,
         context=client._build_context(),
         sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
     )
 
 
@@ -64,13 +74,18 @@ def proof_for_records(client: AuraClient, object_name: str) -> str:
         descriptor=DESCRIPTORS["getItems"],
         params={
             "entityNameOrId": object_name,
-            "listViewApiName": None,
-            "getCount": True,
-            "pageSize": 1,
+            "layoutType": "FULL",
+            "pageSize": 100,
+            "currentPage": 0,
+            "useTimeout": False,
+            "getCount": False,
+            "enableRowActions": False,
         },
         token=client.aura_token,
         context=client._build_context(),
         sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
     )
 
 
@@ -92,4 +107,6 @@ def proof_for_apex(client: AuraClient, controller: str, method: str) -> str:
         token=client.aura_token,
         context=client._build_context(),
         sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
     )

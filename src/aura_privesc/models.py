@@ -107,7 +107,7 @@ class ScanResult(BaseModel):
     soql_capable: bool = False
     objects: list[ObjectResult] = []
     apex_results: list[ApexResult] = []
-    interactive_mode: bool = False
+
     aura_url: str | None = None
     aura_token: str | None = None
     aura_context: str | None = None

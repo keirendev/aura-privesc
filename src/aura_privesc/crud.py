@@ -8,7 +8,7 @@ from typing import Any
 
 from .client import AuraClient
 from .config import DESCRIPTORS
-from .models import CrudOperationResult
+from .models import CrudOperationResult, CrudValidationResult, ObjectResult
 from .proof import generate_curl
 
 logger = logging.getLogger(__name__)
@@ -167,9 +167,13 @@ async def _try_get_items(
     descriptor = DESCRIPTORS["getItems"]
     params = {
         "entityNameOrId": object_name,
+        "layoutType": "FULL",
+        "pageSize": 100,
+        "currentPage": 0,
+        "useTimeout": False,
+        "getCount": False,
+        "enableRowActions": False,
         "listViewApiName": list_view,
-        "getCount": True,
-        "pageSize": 1,
     }
     proof = _proof_curl(client, descriptor, params)
     try:
@@ -186,15 +190,20 @@ def _parse_read_action(action: dict, proof: str) -> CrudOperationResult:
     """Parse a successful getItems action into a CrudOperationResult."""
     rv = action.get("returnValue", {})
     records = rv.get("records") or rv.get("result", [])
-    count = rv.get("count") or rv.get("totalCount")
-    first_record = records[0] if records else None
+    # Unwrap {record: {...}} wrappers if present
+    unwrapped = []
+    for r in records:
+        if isinstance(r, dict) and "record" in r and len(r) == 1:
+            unwrapped.append(r["record"])
+        else:
+            unwrapped.append(r)
+    first_record = unwrapped[0] if unwrapped else None
     record_id = None
     record_data = None
     if first_record and isinstance(first_record, dict):
         record_id = (
-            first_record.get("id")
-            or first_record.get("Id")
-            or first_record.get("record", {}).get("id")
+            first_record.get("Id")
+            or first_record.get("id")
         )
         record_data = first_record
 
@@ -202,7 +211,7 @@ def _parse_read_action(action: dict, proof: str) -> CrudOperationResult:
         operation="read",
         success=True,
         record_id=record_id,
-        record_data={"count": count, "sample": record_data},
+        record_data={"count": len(unwrapped), "sample": record_data},
         proof=proof,
         timestamp=_now_iso(),
     )
@@ -238,9 +247,12 @@ async def read_records(
     descriptor = DESCRIPTORS["getItems"]
     params = {
         "entityNameOrId": object_name,
-        "listViewApiName": None,
-        "getCount": True,
-        "pageSize": 1,
+        "layoutType": "FULL",
+        "pageSize": 100,
+        "currentPage": 0,
+        "useTimeout": False,
+        "getCount": False,
+        "enableRowActions": False,
     }
     fallback_proof = _proof_curl(client, descriptor, params)
 
@@ -397,3 +409,90 @@ async def delete_record(
             operation="delete", error=str(e),
             record_id=record_id, proof=proof, timestamp=_now_iso(),
         )
+
+
+async def auto_crud_test(
+    client: AuraClient, obj: ObjectResult,
+) -> CrudValidationResult:
+    """Automatically test write operations on an object.
+
+    - If createable: fetch field metadata, build test values, create a record
+    - If create succeeded AND updateable: update the created record
+    - If create succeeded: delete the created record (cleanup)
+    - If NOT createable but updateable and sample_records exist: try update on sample
+    Only deletes records we created (safety).
+    """
+    validation = CrudValidationResult(object_name=obj.name)
+    created_id: str | None = None
+    obj_info: dict | None = None
+
+    # --- CREATE ---
+    if obj.crud.createable:
+        obj_info = await get_object_field_metadata(client, obj.name)
+        if obj_info:
+            required = extract_required_fields(obj_info)
+            test_vals = build_test_values(required) if required else {}
+        else:
+            test_vals = {}
+
+        create_result = await create_record(client, obj.name, test_vals)
+        validation.create = create_result
+
+        if create_result.success:
+            created_id = create_result.record_id
+
+    # --- UPDATE ---
+    if obj.crud.updateable:
+        target_id = created_id
+        if not target_id and obj.sample_records:
+            first_rec = obj.sample_records[0]
+            target_id = str(
+                first_rec.get("Id") or first_rec.get("id")
+                or first_rec.get("record", {}).get("id") or ""
+            )
+
+        if target_id:
+            # Find a string field we can safely update
+            if not obj_info:
+                obj_info = await get_object_field_metadata(client, obj.name)
+            update_fields: dict = {}
+            if obj_info:
+                for fname, fmeta in obj_info.get("fields", {}).items():
+                    if (isinstance(fmeta, dict)
+                            and fmeta.get("updateable")
+                            and fmeta.get("dataType") == "String"):
+                        update_fields[fname] = "AuraPrivescTest_update"
+                        break
+            if not update_fields:
+                update_fields = {"Name": "AuraPrivescTest_update"}
+
+            update_result = await update_record(
+                client, obj.name, target_id, update_fields,
+            )
+            validation.update = update_result
+
+    # --- DELETE (cleanup: only delete records we created) ---
+    if created_id:
+        delete_result = await delete_record(client, created_id)
+        validation.delete = delete_result
+
+    return validation
+
+
+async def auto_crud_test_objects(
+    client: AuraClient,
+    objects: list[ObjectResult],
+    progress=None,
+    task_id=None,
+) -> list[ObjectResult]:
+    """Run automated CRUD tests on writable objects sequentially.
+
+    Tests objects where accessible AND readable AND has_write.
+    Updates progress for ALL objects (including skipped) for accurate tracking.
+    """
+    for obj in objects:
+        if obj.accessible and obj.crud.readable and obj.crud.has_write:
+            obj.crud_validation = await auto_crud_test(client, obj)
+        if progress and task_id is not None:
+            progress.update(task_id, advance=1)
+    return objects
