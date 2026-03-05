@@ -44,15 +44,18 @@ aura-privesc -u https://target.my.site.com --interactive
 
 ### Authenticated scan
 
-Supply an Aura token and session ID captured from a browser/proxy session:
+Use `--authenticated` to be prompted for the session ID and Aura token interactively (keeps credentials out of shell history):
 
 ```bash
 aura-privesc -u https://target.my.site.com \
   --endpoint '/s/sfsites/aura' \
-  --sid '<sid cookie value>' \
-  --token '<aura.token value>' \
+  --authenticated \
   --skip-records -v
 ```
+
+You will be prompted for:
+- **Session ID (sid)** — the `sid` cookie value from your browser/proxy session
+- **Aura token** — the `aura.token` value from the page
 
 ### Privileged recon with Salesforce CLI
 
@@ -79,7 +82,7 @@ This outputs `recon_objects.txt` and `recon_apex.txt` with the full list of obje
 ```bash
 aura-privesc -u https://target.my.site.com \
   --endpoint '/s/sfsites/aura' \
-  --sid '<sid>' --token '<token>' \
+  --authenticated \
   --objects-file recon_objects.txt \
   --apex-file recon_apex.txt \
   --skip-records -v
@@ -131,7 +134,7 @@ Objects are classified based on sensitivity and permissions:
 
 ```
 -u, --url TEXT          Target Salesforce base/community URL (required)
--t, --token TEXT        Aura token (omit for guest mode)
+--authenticated         Authenticated scan mode (prompts for sid and token)
 -i, --interactive       Interactive CRUD validation mode
 --json                  Output as JSON (incompatible with --interactive)
 --report / --no-report  Generate HTML report (default: on)
