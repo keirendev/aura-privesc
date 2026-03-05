@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from typing import Any
+from urllib.parse import unquote
 
 from .client import AuraClient
 from .config import ENDPOINT_PATHS
@@ -84,10 +85,12 @@ def _extract_fwuid(html: str) -> str | None:
         r"fwuid=([A-Za-z0-9_-]+)",
         r'auraConfig\["fw"\]\s*=\s*"([^"]+)"',
     ]
-    for pattern in patterns:
-        match = re.search(pattern, html)
-        if match:
-            return match.group(1)
+    # Try raw HTML first, then URL-decoded (fwuid is often in encoded JSON)
+    for text in (html, unquote(html)):
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1)
     return None
 
 
@@ -97,10 +100,11 @@ def _extract_app_name(html: str) -> str | None:
         r'"app"\s*:\s*"([^"]+)"',
         r'"componentDef"\s*:\s*"([^"]+App)"',
     ]
-    for pattern in patterns:
-        match = re.search(pattern, html)
-        if match:
-            return match.group(1)
+    for text in (html, unquote(html)):
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1)
     return None
 
 
@@ -111,13 +115,14 @@ def _extract_context(html: str) -> dict[str, Any]:
         r"aura\.context\s*=\s*({[^;]+});",
         r'"auraContext"\s*:\s*({.+?})\s*[,}]',
     ]
-    for pattern in patterns:
-        match = re.search(pattern, html, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                continue
+    for text in (html, unquote(html)):
+        for pattern in patterns:
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    continue
     return {}
 
 
