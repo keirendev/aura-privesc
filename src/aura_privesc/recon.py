@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 SF_CLI_INSTALL_URL = "https://developer.salesforce.com/tools/salesforcecli"
 
+# Suppress sf CLI update warnings that pollute JSON output
+_SF_ENV = {**__import__("os").environ, "SF_HIDE_RELEASE_NOTES": "true", "SF_SKIP_NEW_VERSION_CHECK": "true"}
+
 
 @dataclass
 class ReconResult:
@@ -39,8 +42,32 @@ def check_sf_cli() -> str:
     return path
 
 
+def sf_display_org(target: str) -> str | None:
+    """Check if an org is already authenticated and return its username."""
+    cmd = ["sf", "org", "display", "--target-org", target, "--json"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=_SF_ENV)
+        if proc.returncode == 0:
+            data = json.loads(proc.stdout)
+            username = data.get("result", {}).get("username")
+            if username:
+                return username
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        pass
+    return None
+
+
 def sf_login(instance_url: str, alias: str | None = None) -> str:
-    """Open browser auth flow and return the authenticated username."""
+    """Open browser auth flow and return the authenticated username.
+
+    If an alias is provided and the org is already authenticated, skips login.
+    """
+    # If alias given, check if already authenticated
+    if alias:
+        existing = sf_display_org(alias)
+        if existing:
+            return existing
+
     cmd = [
         "sf", "org", "login", "web",
         "--instance-url", instance_url,
@@ -55,6 +82,7 @@ def sf_login(instance_url: str, alias: str | None = None) -> str:
             capture_output=True,
             text=True,
             timeout=120,
+            env=_SF_ENV,
         )
     except subprocess.TimeoutExpired as e:
         raise ReconError("Browser login timed out after 120s") from e
@@ -79,24 +107,21 @@ def enumerate_objects(target_org: str) -> list[str]:
     """List all sObject API names in the org via sf CLI."""
     cmd = [
         "sf", "sobject", "list",
-        "--sobject-type", "all",
         "--target-org", target_org,
         "--json",
     ]
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=_SF_ENV)
     except subprocess.TimeoutExpired as e:
         raise ReconError("sf sobject list timed out") from e
 
-    if proc.returncode != 0:
-        stderr = proc.stderr.strip() or proc.stdout.strip()
-        raise ReconError(f"sf sobject list failed: {stderr}")
-
+    # Try parsing JSON even on non-zero exit (sf CLI returns non-zero for warnings)
     try:
         data = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        raise ReconError(f"Failed to parse sobject list output: {e}") from e
+    except json.JSONDecodeError:
+        stderr = proc.stderr.strip() or proc.stdout.strip()
+        raise ReconError(f"sf sobject list failed: {stderr}")
 
     objects = data.get("result", [])
     if not isinstance(objects, list):
@@ -113,10 +138,9 @@ def parse_aura_enabled_methods(apex_body: str) -> list[str]:
 
 def enumerate_aura_methods(target_org: str) -> list[str]:
     """Query all @AuraEnabled methods via the Tooling API."""
-    soql = (
-        "SELECT Name, Body FROM ApexClass "
-        "WHERE Body LIKE '%@AuraEnabled%' AND NamespacePrefix = null"
-    )
+    # Note: Body cannot be filtered in SOQL WHERE clauses, so we fetch all
+    # custom classes and filter for @AuraEnabled in Python.
+    soql = "SELECT Name, Body FROM ApexClass WHERE NamespacePrefix = null"
     cmd = [
         "sf", "data", "query",
         "--query", soql,
@@ -126,18 +150,16 @@ def enumerate_aura_methods(target_org: str) -> list[str]:
     ]
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=_SF_ENV)
     except subprocess.TimeoutExpired as e:
         raise ReconError("Tooling API query timed out") from e
 
-    if proc.returncode != 0:
-        stderr = proc.stderr.strip() or proc.stdout.strip()
-        raise ReconError(f"Tooling API query failed: {stderr}")
-
+    # Try parsing JSON even on non-zero exit (sf CLI returns non-zero for warnings)
     try:
         data = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        raise ReconError(f"Failed to parse query output: {e}") from e
+    except json.JSONDecodeError:
+        stderr = proc.stderr.strip() or proc.stdout.strip()
+        raise ReconError(f"Tooling API query failed: {stderr}")
 
     records = data.get("result", {}).get("records", [])
     methods: list[str] = []
@@ -146,6 +168,8 @@ def enumerate_aura_methods(target_org: str) -> list[str]:
         class_name = record.get("Name", "")
         body = record.get("Body", "")
         if not class_name or not body:
+            continue
+        if "@AuraEnabled" not in body:
             continue
         for method_name in parse_aura_enabled_methods(body):
             methods.append(f"{class_name}.{method_name}")
