@@ -8,6 +8,7 @@ import sys
 
 import click
 from rich.console import Console
+from rich.progress import Progress, BarColumn, MofNCompleteColumn, TimeElapsedColumn
 
 from . import __version__
 from .apex import build_apex_list, discover_apex_from_js, test_apex_methods
@@ -15,9 +16,9 @@ from .client import AuraClient
 from .discovery import run_discovery
 from .enumerator import build_object_list, enumerate_objects
 from .exceptions import AuraError, DiscoveryError, ReconError
-from .models import ScanResult
+from .models import ApexMethodStatus, ScanResult
 from .interactive import run_interactive_validation
-from .output import html_output, json_output, rich_output
+from .output import html_output, json_output
 from .permissions import check_soql_capability, get_config_objects, get_user_info
 
 console = Console(stderr=True)
@@ -255,9 +256,9 @@ async def _run(
         except DiscoveryError as e:
             if json_mode:
                 result.discovery = None
+                json_output.render(result, validated_only=not skip_validation)
             else:
                 console.print(f"[red]Discovery failed:[/red] {e}")
-            _output(result, json_mode, validated_only=not skip_validation)
             sys.exit(1)
 
         # Phase 2: User context + SOQL check
@@ -282,13 +283,24 @@ async def _run(
                 highlight=False,
             )
 
-        result.objects = await enumerate_objects(
-            client,
-            all_objects,
-            skip_crud=skip_crud,
-            skip_records=skip_records,
-            skip_validation=skip_validation,
-        )
+        with Progress(
+            "[progress.description]{task.description}",
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            console=console,
+            disable=json_mode,
+        ) as progress:
+            tid = progress.add_task("Enumerating objects", total=len(all_objects))
+            result.objects = await enumerate_objects(
+                client,
+                all_objects,
+                skip_crud=skip_crud,
+                skip_records=skip_records,
+                skip_validation=skip_validation,
+                progress=progress,
+                task_id=tid,
+            )
 
         # Phase 4: Apex testing
         if not skip_apex:
@@ -300,9 +312,19 @@ async def _run(
             apex_list = build_apex_list(discovered_apex, user_apex)
 
             if apex_list:
-                result.apex_results = await test_apex_methods(
-                    client, apex_list, skip_validation=skip_validation,
-                )
+                with Progress(
+                    "[progress.description]{task.description}",
+                    BarColumn(),
+                    MofNCompleteColumn(),
+                    TimeElapsedColumn(),
+                    console=console,
+                    disable=json_mode,
+                ) as progress:
+                    tid = progress.add_task("Testing Apex methods", total=len(apex_list))
+                    result.apex_results = await test_apex_methods(
+                        client, apex_list, skip_validation=skip_validation,
+                        progress=progress, task_id=tid,
+                    )
 
         # Phase 5: Interactive CRUD validation
         if interactive:
@@ -312,19 +334,27 @@ async def _run(
             result.objects = await run_interactive_validation(client, result.objects)
 
     validated_only = not skip_validation
-    _output(result, json_mode, validated_only=validated_only)
 
-    # Phase 6: HTML report
-    if report and not json_mode:
-        report_path = html_output.write_report(result, validated_only=validated_only, output_dir=report_dir)
-        console.print(f"[green]Report written to:[/green] {report_path}")
-
-
-def _output(result: ScanResult, json_mode: bool, *, validated_only: bool = False) -> None:
     if json_mode:
         json_output.render(result, validated_only=validated_only)
     else:
-        rich_output.render(result, validated_only=validated_only)
+        # Summary stats
+        accessible = result.validated_objects if validated_only else result.accessible_objects
+        callable_apex = [
+            r for r in result.apex_results
+            if r.status == ApexMethodStatus.CALLABLE and (not validated_only or r.validated is True)
+        ]
+        console.print()
+        console.print(
+            f"[green]Scan complete:[/green] "
+            f"{len(accessible)} accessible objects, "
+            f"{len(callable_apex)} callable Apex methods"
+        )
+
+        # HTML report
+        if report:
+            report_path = html_output.write_report(result, output_dir=report_dir, validated_only=validated_only)
+            console.print(f"[green]Report:[/green] {report_path}")
 
 
 def _load_lines(path: str) -> list[str]:
