@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -38,6 +38,7 @@ class AuraClient:
         proxy: str | None = None,
         insecure: bool = False,
         verbose: bool = False,
+        sid: str | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.endpoint = endpoint
@@ -49,6 +50,7 @@ class AuraClient:
         self.verbose = verbose
         self.proxy = proxy
         self.insecure = insecure
+        self.sid = sid
         self._semaphore = asyncio.Semaphore(concurrency)
 
         transport_kwargs: dict[str, Any] = {}
@@ -67,6 +69,10 @@ class AuraClient:
             },
             **transport_kwargs,
         )
+
+        if sid:
+            domain = urlparse(base_url).hostname
+            self._http.cookies.set("sid", sid, domain=domain)
 
     @property
     def aura_url(self) -> str:

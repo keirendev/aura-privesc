@@ -28,3 +28,7 @@ class AuraRequestError(AuraError):
         self.status_code = status_code
         self.raw = raw
         super().__init__(message)
+
+
+class ReconError(AuraError):
+    """Salesforce CLI recon operation failed."""

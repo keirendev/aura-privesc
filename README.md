@@ -7,12 +7,16 @@ Salesforce Aura/Lightning privilege escalation scanner. Discovers exposed Aura e
 Requires Python 3.11+.
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
 Or install dependencies directly:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
