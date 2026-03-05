@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "aura-privesc"
 version = "0.1.0"
 description = "Salesforce Aura/Lightning privilege escalation scanner"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",

@@ -10,3 +10,4 @@ venv/
 .env
 aura-report-*.html
 recon/
+CLAUDE.md

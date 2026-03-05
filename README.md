@@ -42,10 +42,10 @@ Use the `recon` subcommand with a privileged org user to enumerate all objects a
 **1. Authenticate with the Salesforce CLI:**
 
 ```bash
-sf org login access-token --instance-url https://your-instance.sandbox.my.salesforce.com -a myalias
+sf org login web --instance-url https://your-instance.sandbox.my.salesforce.com -a myalias
 ```
 
-When prompted, paste the `sid` cookie value from your authenticated browser session.
+This opens a browser for OAuth login. Alternatively, use `sf org login access-token` if you have a session token.
 
 **2. Run recon:**
 
@@ -53,7 +53,7 @@ When prompted, paste the `sid` cookie value from your authenticated browser sess
 aura-privesc recon -u https://your-instance.sandbox.my.salesforce.com --alias myalias -v
 ```
 
-This outputs `recon_objects.txt` and `recon_apex.txt` with the full list of objects and `@AuraEnabled` methods visible to the privileged user.
+This outputs `recon-objects-<slug>.txt` and `recon-apex-<slug>.txt` (in a `recon/` directory) with the full list of objects and `@AuraEnabled` methods visible to the privileged user.
 
 **3. Scan the community endpoint using the recon output:**
 
@@ -61,8 +61,8 @@ This outputs `recon_objects.txt` and `recon_apex.txt` with the full list of obje
 aura-privesc -u https://target.my.site.com \
   --endpoint '/s/sfsites/aura' \
   --authenticated \
-  --objects-file recon_objects.txt \
-  --apex-file recon_apex.txt \
+  --objects-file recon/recon-objects-<slug>.txt \
+  --apex-file recon/recon-apex-<slug>.txt \
   --proxy http://127.0.0.1:8080 --insecure
 ```
 
@@ -100,7 +100,7 @@ The scan tells you which objects are exposed and readable. To prove write access
 ## Other output formats
 
 - **JSON** (`--json`) — machine-readable scan results on stdout
-- **Terminal** — Rich-formatted summary tables (always shown alongside the report)
+- **Terminal** — summary of findings printed to the terminal
 
 ## Options
 
