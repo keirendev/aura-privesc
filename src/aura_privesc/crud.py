@@ -103,6 +103,7 @@ def _proof_curl(client: AuraClient, descriptor: str, params: dict) -> str:
         context=client._build_context(),
         proxy=client.proxy,
         insecure=client.insecure,
+        sid=client.sid,
     )
 
 

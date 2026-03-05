@@ -14,7 +14,7 @@ from .apex import build_apex_list, discover_apex_from_js, test_apex_methods
 from .client import AuraClient
 from .discovery import run_discovery
 from .enumerator import build_object_list, enumerate_objects
-from .exceptions import AuraError, DiscoveryError
+from .exceptions import AuraError, DiscoveryError, ReconError
 from .models import ScanResult
 from .interactive import run_interactive_validation
 from .output import html_output, json_output, rich_output
@@ -23,9 +23,26 @@ from .permissions import check_soql_capability, get_config_objects, get_user_inf
 console = Console(stderr=True)
 
 
-@click.command()
+class DefaultGroup(click.Group):
+    """Falls back to 'scan' when no subcommand matches."""
+
+    def parse_args(self, ctx, args):
+        # Let --help and --version be handled by the group itself
+        if args and args[0] not in self.commands and args[0] not in ("--help", "-h", "--version"):
+            args = ["scan"] + list(args)
+        return super().parse_args(ctx, args)
+
+
+@click.group(cls=DefaultGroup)
+@click.version_option(version=__version__)
+def main():
+    """Salesforce Aura/Lightning privilege escalation scanner."""
+
+
+@main.command()
 @click.option("-u", "--url", required=True, help="Target Salesforce base/community URL")
 @click.option("-t", "--token", default=None, help="Aura token (omit for guest mode)")
+@click.option("--sid", default=None, help="Salesforce session ID cookie for authenticated scans")
 @click.option("--context", "manual_context", default=None, help="Manual aura.context JSON")
 @click.option("--endpoint", "manual_endpoint", default=None, help="Manual aura endpoint path")
 @click.option("--objects-file", type=click.Path(exists=True), help="File with additional object API names")
@@ -44,10 +61,10 @@ console = Console(stderr=True)
 @click.option("-i", "--interactive", is_flag=True, help="Interactive CRUD validation mode")
 @click.option("--report/--no-report", default=True, help="Generate HTML report (default: on)")
 @click.option("--report-dir", type=click.Path(file_okay=False), default=".", help="Directory for HTML report output")
-@click.version_option(version=__version__)
-def main(
+def scan(
     url: str,
     token: str | None,
+    sid: str | None,
     manual_context: str | None,
     manual_endpoint: str | None,
     objects_file: str | None,
@@ -67,7 +84,7 @@ def main(
     report: bool,
     report_dir: str,
 ) -> None:
-    """Salesforce Aura/Lightning privilege escalation scanner."""
+    """Run the Aura privilege escalation scan."""
     if interactive and json_mode:
         console.print("[red]Error:[/red] --interactive and --json cannot be used together.")
         sys.exit(1)
@@ -81,6 +98,7 @@ def main(
         _run(
             url=url,
             token=token,
+            sid=sid,
             manual_context=manual_context,
             manual_endpoint=manual_endpoint,
             objects_file=objects_file,
@@ -103,10 +121,91 @@ def main(
     )
 
 
+@main.command()
+@click.option("-u", "--url", required=True, help="Salesforce instance URL")
+@click.option("--alias", default=None, help="Org alias for sf CLI")
+@click.option("--output-dir", type=click.Path(file_okay=False), default=".", help="Directory for output files")
+@click.option("--skip-apex", is_flag=True, help="Skip Apex class enumeration")
+@click.option("--skip-objects", is_flag=True, help="Skip sObject enumeration")
+@click.option("-v", "--verbose", is_flag=True, help="Debug output")
+def recon(
+    url: str,
+    alias: str | None,
+    output_dir: str,
+    skip_apex: bool,
+    skip_objects: bool,
+    verbose: bool,
+) -> None:
+    """Enumerate objects and Apex methods via Salesforce CLI (requires sf)."""
+    from .recon import (
+        ReconResult,
+        check_sf_cli,
+        enumerate_aura_methods,
+        enumerate_objects as recon_enumerate_objects,
+        save_results,
+        sf_login,
+    )
+
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
+    else:
+        logging.basicConfig(level=logging.WARNING)
+
+    instance_url = url.rstrip("/")
+    result = ReconResult(instance_url=instance_url)
+
+    try:
+        console.print("[cyan]Step 1:[/cyan] Checking sf CLI...", highlight=False)
+        sf_path = check_sf_cli()
+        console.print(f"  Found: {sf_path}")
+
+        console.print("[cyan]Step 2:[/cyan] Browser login...", highlight=False)
+        console.print("  Opening browser — complete the login flow...")
+        username = sf_login(instance_url, alias=alias)
+        result.username = username
+        target_org = alias or username
+        console.print(f"  Authenticated as: [green]{username}[/green]")
+
+        if not skip_objects:
+            console.print("[cyan]Step 3:[/cyan] Enumerating sObjects...", highlight=False)
+            result.objects = recon_enumerate_objects(target_org)
+            console.print(f"  Found [green]{len(result.objects)}[/green] objects")
+
+        if not skip_apex:
+            step = "4" if not skip_objects else "3"
+            console.print(f"[cyan]Step {step}:[/cyan] Querying @AuraEnabled Apex methods...", highlight=False)
+            result.apex_methods = enumerate_aura_methods(target_org)
+            console.print(f"  Found [green]{len(result.apex_methods)}[/green] methods")
+
+        objects_path, apex_path = save_results(result, output_dir=output_dir)
+
+        console.print()
+        console.print("[green]Recon complete![/green]")
+        if objects_path:
+            console.print(f"  Objects file: {objects_path}")
+        if apex_path:
+            console.print(f"  Apex file:    {apex_path}")
+
+        # Print next-steps command
+        console.print()
+        console.print("[cyan]Next steps — run scan with recon output:[/cyan]")
+        cmd_parts = ["aura-privesc scan -u <TARGET_COMMUNITY_URL>"]
+        if objects_path:
+            cmd_parts.append(f"  --objects-file {objects_path}")
+        if apex_path:
+            cmd_parts.append(f"  --apex-file {apex_path}")
+        console.print(" \\\n".join(cmd_parts))
+
+    except ReconError as e:
+        console.print(f"[red]Recon error:[/red] {e}")
+        sys.exit(1)
+
+
 async def _run(
     *,
     url: str,
     token: str | None,
+    sid: str | None = None,
     manual_context: str | None,
     manual_endpoint: str | None,
     objects_file: str | None,
@@ -139,6 +238,7 @@ async def _run(
         proxy=proxy,
         insecure=insecure,
         verbose=verbose,
+        sid=sid,
     ) as client:
         # Phase 1: Discovery
         if not json_mode:
