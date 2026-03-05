@@ -18,8 +18,6 @@ def generate_curl(
     token: str,
     context: str,
     *,
-    proxy: str | None = None,
-    insecure: bool = False,
     sid: str | None = None,
 ) -> str:
     """Build a ready-to-paste curl command that reproduces an Aura request."""
@@ -39,16 +37,12 @@ def generate_curl(
 
     body = f"message={message}&aura.context={context}&aura.pageURI=/s/&aura.token={token}"
 
-    flags = ""
-    if proxy:
-        flags += f" --proxy {proxy} -k"
-    elif insecure:
-        flags += " -k"
+    flags = " -k --proxy http://127.0.0.1:8080"
 
     if sid:
         flags += f" -H 'Cookie: sid={sid}'"
 
-    return f"curl -s -X POST '{aura_url}' -H 'Content-Type: application/x-www-form-urlencoded'{flags} -d '{body}'"
+    return f"curl -X POST '{aura_url}' -H 'Content-Type: application/x-www-form-urlencoded'{flags} -d '{body}' | python3 -m json.tool"
 
 
 def proof_for_object(client: AuraClient, object_name: str) -> str:
@@ -59,8 +53,6 @@ def proof_for_object(client: AuraClient, object_name: str) -> str:
         params={"objectApiName": object_name},
         token=client.aura_token,
         context=client._build_context(),
-        proxy=client.proxy,
-        insecure=client.insecure,
         sid=client.sid,
     )
 
@@ -78,8 +70,6 @@ def proof_for_records(client: AuraClient, object_name: str) -> str:
         },
         token=client.aura_token,
         context=client._build_context(),
-        proxy=client.proxy,
-        insecure=client.insecure,
         sid=client.sid,
     )
 
@@ -101,7 +91,5 @@ def proof_for_apex(client: AuraClient, controller: str, method: str) -> str:
         params=params,
         token=client.aura_token,
         context=client._build_context(),
-        proxy=client.proxy,
-        insecure=client.insecure,
         sid=client.sid,
     )

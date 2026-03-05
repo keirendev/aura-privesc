@@ -7,7 +7,7 @@ import tempfile
 
 import pytest
 
-from aura_privesc.enumerator import _parse_object_info, get_record_count
+from aura_privesc.enumerator import _parse_object_info, get_record_count, get_records
 from aura_privesc.apex import _classify_apex_response
 from aura_privesc.models import (
     ApexMethodStatus,
@@ -53,11 +53,14 @@ def _object_info_error(message: str = "No access") -> dict:
     }
 
 
-def _get_items_success(count: int) -> dict:
+def _get_items_success(count: int, records: list | None = None) -> dict:
+    rv = {"count": count}
+    if records is not None:
+        rv["records"] = records
     return {
         "actions": [{
             "state": "SUCCESS",
-            "returnValue": {"count": count},
+            "returnValue": rv,
         }],
     }
 
@@ -398,3 +401,151 @@ class TestCLISummaryStats:
         assert apex.status.value == "callable"
         # The correct comparison
         assert apex.status == ApexMethodStatus.CALLABLE
+
+
+# ---------------------------------------------------------------------------
+# 6. get_records tests
+# ---------------------------------------------------------------------------
+
+class TestGetRecords:
+    @pytest.mark.asyncio
+    async def test_returns_count_and_records(self):
+        sample = [{"Id": "001xx", "Name": "Acme"}]
+
+        class FakeClient:
+            async def request(self, descriptor, params):
+                return _get_items_success(1, records=sample)
+
+        count, records = await get_records(FakeClient(), "Account")
+        assert count == 1
+        assert records == sample
+
+    @pytest.mark.asyncio
+    async def test_zero_count_empty_records(self):
+        class FakeClient:
+            async def request(self, descriptor, params):
+                return _get_items_success(0, records=[])
+
+        count, records = await get_records(FakeClient(), "Account")
+        assert count == 0
+        assert records == []
+
+    @pytest.mark.asyncio
+    async def test_error_returns_none_empty(self):
+        class FakeClient:
+            async def request(self, descriptor, params):
+                raise RuntimeError("boom")
+
+        count, records = await get_records(FakeClient(), "Account")
+        assert count is None
+        assert records == []
+
+    @pytest.mark.asyncio
+    async def test_no_records_key_returns_empty_list(self):
+        class FakeClient:
+            async def request(self, descriptor, params):
+                return _get_items_success(5)
+
+        count, records = await get_records(FakeClient(), "Account")
+        assert count == 5
+        assert records == []
+
+
+# ---------------------------------------------------------------------------
+# 7. HTML report interactive features
+# ---------------------------------------------------------------------------
+
+def _make_interactive_scan_result() -> ScanResult:
+    """Build a ScanResult with aura connection details and sample records."""
+    return ScanResult(
+        target_url="https://example.force.com",
+        discovery=DiscoveryInfo(endpoint="/s/sfsites/aura", mode="guest"),
+        aura_url="https://example.force.com/s/sfsites/aura",
+        aura_token="mytoken",
+        aura_context='{"mode":"PROD","app":"siteforce:communityApp"}',
+        sid=None,
+        objects=[
+            ObjectResult(
+                name="Account",
+                accessible=True,
+                validated=True,
+                crud=CrudPermissions(readable=True, createable=True, queryable=True),
+                record_count=2,
+                sample_records=[
+                    {"Id": "001xx000001", "Name": "Acme Corp"},
+                    {"Id": "001xx000002", "Name": "Globex"},
+                ],
+                risk=RiskLevel.HIGH,
+            ),
+            ObjectResult(
+                name="Contact",
+                accessible=True,
+                validated=True,
+                crud=CrudPermissions(readable=True),
+                record_count=0,
+                sample_records=[],
+                risk=RiskLevel.LOW,
+            ),
+        ],
+        apex_results=[
+            ApexResult(
+                controller_method="MyCtrl.doThing",
+                status=ApexMethodStatus.CALLABLE,
+                validated=True,
+            ),
+        ],
+    )
+
+
+class TestHTMLInteractiveFeatures:
+    def test_aura_config_present(self):
+        result = _make_interactive_scan_result()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = write_report(result, output_dir=tmpdir, validated_only=True)
+            content = open(path).read()
+        assert "var AURA=" in content
+        assert '"url": "https://example.force.com/s/sfsites/aura"' in content
+        assert '"token": "mytoken"' in content
+
+    def test_fire_buttons_for_objects(self):
+        result = _make_interactive_scan_result()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = write_report(result, output_dir=tmpdir, validated_only=True)
+            content = open(path).read()
+        assert "getObjectInfo" in content
+        assert "getItems" in content
+        assert ">Create<" in content
+        assert ">Update<" in content
+        assert ">Delete<" in content
+
+    def test_fire_button_for_apex(self):
+        result = _make_interactive_scan_result()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = write_report(result, output_dir=tmpdir, validated_only=True)
+            content = open(path).read()
+        assert ">Fire<" in content
+        assert "ApexActionController" in content
+
+    def test_expand_rows_present(self):
+        result = _make_interactive_scan_result()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = write_report(result, output_dir=tmpdir, validated_only=True)
+            content = open(path).read()
+        assert 'class="expand-row"' in content
+        assert 'class="obj-row"' in content
+
+    def test_sample_records_in_expand(self):
+        result = _make_interactive_scan_result()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = write_report(result, output_dir=tmpdir, validated_only=True)
+            content = open(path).read()
+        assert "Acme Corp" in content
+        assert "Globex" in content
+        assert 'class="records-table"' in content
+
+    def test_no_aura_config_when_missing(self):
+        result = _make_scan_result()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = write_report(result, output_dir=tmpdir, validated_only=True)
+            content = open(path).read()
+        assert "var AURA=" not in content
