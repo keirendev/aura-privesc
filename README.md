@@ -1,6 +1,6 @@
 # aura-privesc
 
-Salesforce Aura/Lightning privilege escalation scanner. Discovers exposed Aura endpoints, enumerates object-level CRUD permissions, tests Apex controllers, and automatically proves write access through CRUD testing.
+Salesforce Aura/Lightning privilege escalation scanner. Discovers exposed Aura endpoints, enumerates which objects are readable via `getItems`, tests Apex controllers, and generates an interactive HTML report with ready-to-use curl commands for manual CRUD validation.
 
 ## Install
 
@@ -10,14 +10,6 @@ Requires Python 3.11+.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-```
-
-Or install dependencies directly:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 ```
 
 ## Usage
@@ -36,7 +28,6 @@ Use `--authenticated` to be prompted for the session ID and Aura token interacti
 aura-privesc -u https://target.my.site.com \
   --endpoint '/s/sfsites/aura' \
   --authenticated \
-  --skip-records -v \
   --proxy http://127.0.0.1:8080 --insecure
 ```
 
@@ -59,7 +50,7 @@ When prompted, paste the `sid` cookie value from your authenticated browser sess
 **2. Run recon:**
 
 ```bash
-aura-privesc recon -u https://your-instance.sandbox.my.salesforce.com --alias myalias -v --proxy http://127.0.0.1:8080 --insecure
+aura-privesc recon -u https://your-instance.sandbox.my.salesforce.com --alias myalias -v
 ```
 
 This outputs `recon_objects.txt` and `recon_apex.txt` with the full list of objects and `@AuraEnabled` methods visible to the privileged user.
@@ -72,62 +63,66 @@ aura-privesc -u https://target.my.site.com \
   --authenticated \
   --objects-file recon_objects.txt \
   --apex-file recon_apex.txt \
-  --skip-records -v \
   --proxy http://127.0.0.1:8080 --insecure
 ```
 
-### JSON output
+## What the scan does
 
-```bash
-aura-privesc -u https://target.my.site.com --json --proxy http://127.0.0.1:8080 --insecure
-```
+The scanner automates the discovery and enumeration phase of Aura privilege escalation testing:
 
-### Custom object/Apex lists
+1. **Discovery** — probes endpoint paths, extracts fwuid and aura.context from community HTML
+2. **User context** — identifies current user, checks SOQL capability, discovers config objects
+3. **Object enumeration** — calls `getObjectInfo` for each object to check CRUD permission flags, then `getItems` to confirm whether records are actually readable. Validates findings to filter false positives
+4. **Apex testing** — discovers `@AuraEnabled` controllers from community JS files, tests each method, classifies as CALLABLE / DENIED / NOT_FOUND
 
-```bash
-aura-privesc -u https://target.my.site.com --objects-file custom_objects.txt --apex-file apex_methods.txt --proxy http://127.0.0.1:8080 --insecure
-```
+## HTML report
 
-Files should contain one entry per line (`#` comments and blank lines are ignored).
+The primary output is a self-contained HTML report (dark theme, no external dependencies) generated automatically in the current directory. The report includes:
 
-## Scan Phases
+- **Object findings table** — sortable/filterable, showing which objects are accessible and readable, with record counts
+- **Expandable rows** — click any object to see sample record data
+- **Action buttons** — each object row has ready-to-use buttons (getObjectInfo, getItems, Create, Update, Delete) that copy a curl command to your clipboard. These are the starting point for manual CRUD validation — modify the field values and record IDs as needed for your test case
+- **Apex methods table** — callable methods with Fire buttons to generate curl commands
+- **Search/sort** — filter and sort all tables client-side
 
-| Phase | Description |
-|-------|-------------|
-| 1 | **Discovery** — probes endpoint paths, extracts fwuid and aura.context from community HTML |
-| 2 | **User context** — identifies current user, checks SOQL capability, discovers config objects |
-| 3 | **Object enumeration** — checks CRUD permissions via `getObjectInfo`, retrieves records via `getItems`, validates findings to filter false positives |
-| 3b | **CRUD write testing** — automatically tests create/update/delete on writable objects to prove access |
-| 4 | **Apex testing** — discovers controllers from JS files, tests each method, classifies as CALLABLE/DENIED/NOT_FOUND |
-| 5 | **Reporting** — generates an HTML report with all findings and proofs |
+Use `--no-report` to suppress report generation, or `--report-dir ./reports` to change the output directory.
 
-## Output
+### Manual CRUD validation workflow
 
-- **Terminal** — Rich-formatted tables with CRUD permission flags and proof curl commands
+The scan tells you which objects are exposed and readable. To prove write access, use the report's action buttons as a starting point:
+
+1. Open the HTML report
+2. Expand an object row to see its sample records and action buttons
+3. Click **Create** / **Update** / **Delete** to copy a base curl command
+4. Modify the curl as needed (field names, values, record IDs) and run it through your proxy
+5. Verify the operation succeeded in the Aura response
+
+## Other output formats
+
 - **JSON** (`--json`) — machine-readable scan results on stdout
-- **HTML report** — self-contained file with embedded CSS (dark theme), generated by default in the current directory. Use `--no-report` to suppress or `--report-dir ./reports` to change location
+- **Terminal** — Rich-formatted summary tables (always shown alongside the report)
 
 ## Options
 
 ```
 -u, --url TEXT          Target Salesforce base/community URL (required)
 --authenticated         Authenticated scan mode (prompts for sid and token)
---json                  Output as JSON
---report / --no-report  Generate HTML report (default: on)
---report-dir DIRECTORY  Directory for HTML report output
---objects-file PATH     File with additional object API names
---apex-file PATH        File with Apex controller.method pairs
 --context TEXT          Manual aura.context JSON
 --endpoint TEXT         Manual aura endpoint path
---skip-crud             Skip per-object CRUD permission checks
---skip-records          Skip record count enumeration
+--objects-file PATH     File with additional object API names
+--apex-file PATH        File with Apex controller.method pairs
+--json                  Output as JSON
+--skip-crud             Skip per-object CRUD permission checks (getObjectInfo)
+--skip-records          Skip record retrieval (getItems)
 --skip-crud-test        Skip automated CRUD write testing
 --skip-apex             Skip Apex controller testing
 --skip-validation       Skip finding validation (faster, may include false positives)
+--report / --no-report  Generate HTML report (default: on)
+--report-dir DIRECTORY  Directory for HTML report output
 --timeout INTEGER       HTTP timeout in seconds (default: 30)
 --delay INTEGER         Delay between requests in ms (default: 0)
 --concurrency INTEGER   Max concurrent requests (default: 5)
---proxy TEXT            HTTP proxy URL
+--proxy TEXT            HTTP proxy URL (e.g. http://127.0.0.1:8080 for Burp)
 --insecure              Disable TLS verification
 -v, --verbose           Show raw request/response data
 ```
