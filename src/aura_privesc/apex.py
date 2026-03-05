@@ -169,7 +169,15 @@ async def test_apex_methods(
     methods: list[str],
     *,
     skip_validation: bool = False,
+    progress=None,
+    task_id=None,
 ) -> list[ApexResult]:
     """Test all Apex methods concurrently (bounded by client semaphore)."""
-    tasks = [test_apex_method(client, m, skip_validation=skip_validation) for m in methods]
-    return list(await asyncio.gather(*tasks))
+    coros = [test_apex_method(client, m, skip_validation=skip_validation) for m in methods]
+    results = []
+    for coro in asyncio.as_completed(coros):
+        result = await coro
+        results.append(result)
+        if progress and task_id is not None:
+            progress.update(task_id, advance=1)
+    return results

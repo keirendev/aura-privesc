@@ -44,10 +44,45 @@ aura-privesc -u https://target.my.site.com --interactive
 
 ### Authenticated scan
 
-Supply an Aura token captured from a browser session:
+Supply an Aura token and session ID captured from a browser/proxy session:
 
 ```bash
-aura-privesc -u https://target.my.site.com -t "eyJhbGciOi..."
+aura-privesc -u https://target.my.site.com \
+  --endpoint '/s/sfsites/aura' \
+  --sid '<sid cookie value>' \
+  --token '<aura.token value>' \
+  --skip-records -v
+```
+
+### Privileged recon with Salesforce CLI
+
+Use the `recon` subcommand with a privileged org user to enumerate all objects and Apex controllers, then feed the results into a scan against the community endpoint to find privilege escalation gaps.
+
+**1. Authenticate with the Salesforce CLI:**
+
+```bash
+sf org login access-token --instance-url https://your-instance.sandbox.my.salesforce.com -a myalias
+```
+
+When prompted, paste the `sid` cookie value from your authenticated browser session.
+
+**2. Run recon:**
+
+```bash
+aura-privesc recon -u https://your-instance.sandbox.my.salesforce.com --alias myalias -v
+```
+
+This outputs `recon_objects.txt` and `recon_apex.txt` with the full list of objects and `@AuraEnabled` methods visible to the privileged user.
+
+**3. Scan the community endpoint using the recon output:**
+
+```bash
+aura-privesc -u https://target.my.site.com \
+  --endpoint '/s/sfsites/aura' \
+  --sid '<sid>' --token '<token>' \
+  --objects-file recon_objects.txt \
+  --apex-file recon_apex.txt \
+  --skip-records -v
 ```
 
 ### JSON output

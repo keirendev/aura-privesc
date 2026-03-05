@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
 
@@ -42,7 +42,7 @@ class AuraClient:
     ):
         self.base_url = base_url.rstrip("/")
         self.endpoint = endpoint
-        self.token = token
+        self.token = unquote(token) if token else token
         self.fwuid = fwuid
         self.app_name = app_name or "siteforce:communityApp"
         self.context = context or {}
@@ -97,6 +97,19 @@ class AuraClient:
     def _build_message(self, actions: list[dict[str, Any]]) -> str:
         return json.dumps({"actions": actions})
 
+    @staticmethod
+    def _encode_form(fields: dict[str, str]) -> str:
+        """Build an x-www-form-urlencoded body with exact control over encoding.
+
+        Uses quote() with safe='' so every special character is percent-encoded
+        exactly once — avoids the double-encoding that httpx's data= causes when
+        values already contain percent-encoded sequences.
+        """
+        parts = []
+        for k, v in fields.items():
+            parts.append(f"{quote(k, safe='')}={quote(v, safe='')}")
+        return "&".join(parts)
+
     def _build_action(
         self,
         descriptor: str,
@@ -123,18 +136,18 @@ class AuraClient:
                 await asyncio.sleep(self.delay_ms / 1000.0)
 
             action = self._build_action(descriptor, params)
-            data = {
+            body = self._encode_form({
                 "message": self._build_message([action]),
                 "aura.context": self._build_context(),
                 "aura.pageURI": "/s/",
                 "aura.token": self.aura_token,
-            }
+            })
 
             if self.verbose:
                 logger.info("POST %s | descriptor=%s params=%s", self.aura_url, descriptor, params)
 
             try:
-                resp = await self._http.post(self.aura_url, data=data)
+                resp = await self._http.post(self.aura_url, content=body)
             except httpx.HTTPError as e:
                 raise AuraRequestError(f"HTTP error: {e}") from e
 
@@ -233,13 +246,13 @@ class AuraClient:
         """Send a lightweight probe POST to check if endpoint is valid."""
         try:
             action = self._build_action(DESCRIPTORS["getConfigData"])
-            data = {
+            body = self._encode_form({
                 "message": self._build_message([action]),
                 "aura.context": self._build_context(),
                 "aura.pageURI": "/s/",
                 "aura.token": self.aura_token,
-            }
-            resp = await self._http.post(url, data=data)
+            })
+            resp = await self._http.post(url, content=body)
             return resp
         except httpx.HTTPError:
             return None
