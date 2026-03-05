@@ -67,16 +67,19 @@ async def validate_object_result(
     result.validated = True
     result.validation_detail = "Object metadata confirmed"
 
-    # If queryable, attempt getItems to confirm record-level access
-    if result.crud.queryable:
+    # If readable, attempt getItems to confirm record-level access
+    if result.crud.readable:
         try:
             items_resp = await client.request(
                 DESCRIPTORS["getItems"],
                 {
                     "entityNameOrId": result.name,
-                    "listViewApiName": None,
-                    "getCount": True,
-                    "pageSize": 1,
+                    "layoutType": "FULL",
+                    "pageSize": 100,
+                    "currentPage": 0,
+                    "useTimeout": False,
+                    "getCount": False,
+                    "enableRowActions": False,
                 },
             )
             items_actions = items_resp.get("actions", [])

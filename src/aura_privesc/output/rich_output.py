@@ -8,20 +8,13 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
-from ..models import ApexMethodStatus, CrudValidationResult, ObjectResult, RiskLevel, ScanResult
+from ..models import ApexMethodStatus, ObjectResult, RiskLevel, ScanResult
 
 console = Console()
 
-RISK_COLORS = {
-    RiskLevel.CRITICAL: "bold red",
-    RiskLevel.HIGH: "red",
-    RiskLevel.MEDIUM: "yellow",
-    RiskLevel.LOW: "green",
-    RiskLevel.INFO: "dim",
-}
-
 CHECK = "[green]\u2713[/green]"
-CROSS = "[dim]\u2717[/dim]"
+CROSS = "[red]\u2717[/red]"
+DASH = "[dim]\u2014[/dim]"
 
 
 def print_banner() -> None:
@@ -61,6 +54,16 @@ def print_discovery(result: ScanResult) -> None:
     console.print(Panel(table, title="[bold]Discovery[/bold]", border_style="blue"))
 
 
+def _crud_cell(obj: ObjectResult, op: str) -> str:
+    """Three-state display for C/U/D: proven / failed / not attempted."""
+    cv = obj.crud_validation
+    if cv is not None:
+        result = getattr(cv, op, None)
+        if result is not None:
+            return CHECK if result.success else CROSS
+    return DASH
+
+
 def print_objects(objects: list[ObjectResult], validated_only: bool = False) -> None:
     accessible = [o for o in objects if o.accessible]
 
@@ -88,29 +91,20 @@ def print_objects(objects: list[ObjectResult], validated_only: bool = False) -> 
     table.add_column("C", justify="center")
     table.add_column("U", justify="center")
     table.add_column("D", justify="center")
-    table.add_column("Q", justify="center")
     table.add_column("Records", justify="right")
-    table.add_column("Risk", justify="center")
 
-    # Sort: critical first, then high, medium, low
-    risk_order = {RiskLevel.CRITICAL: 0, RiskLevel.HIGH: 1, RiskLevel.MEDIUM: 2, RiskLevel.LOW: 3, RiskLevel.INFO: 4}
-    display.sort(key=lambda o: (risk_order.get(o.risk, 99), o.name))
+    display.sort(key=lambda o: o.name)
 
     for obj in display:
-        c = obj.crud
         count_str = str(obj.record_count) if obj.record_count is not None else "-"
-        risk_style = RISK_COLORS.get(obj.risk, "")
-        risk_text = Text(obj.risk.value.upper(), style=risk_style)
 
         table.add_row(
             obj.name,
-            CHECK if c.readable else CROSS,
-            CHECK if c.createable else CROSS,
-            CHECK if c.updateable else CROSS,
-            CHECK if c.deletable else CROSS,
-            CHECK if c.queryable else CROSS,
+            CHECK if obj.crud.readable else CROSS,
+            _crud_cell(obj, "create"),
+            _crud_cell(obj, "update"),
+            _crud_cell(obj, "delete"),
             count_str,
-            risk_text,
         )
 
     console.print(table)
@@ -169,27 +163,20 @@ def print_summary(result: ScanResult, validated_only: bool = False) -> None:
         accessible = result.accessible_objects
         label = "Objects accessible"
 
-    critical = [o for o in accessible if o.risk in (RiskLevel.CRITICAL, RiskLevel.HIGH)]
+    writable = [o for o in accessible if o.crud.has_write]
+    proven = [o for o in accessible if o.crud_validation is not None and o.crud_validation.proven_operations]
 
     lines: list[str] = []
     lines.append(f"Objects scanned: {len(result.objects)}")
     lines.append(f"{label}: {len(accessible)}")
 
-    if critical:
-        lines.append(f"[bold red]High-risk findings: {len(critical)}[/bold red]")
-        for obj in critical:
-            perms = []
-            if obj.crud.createable:
-                perms.append("C")
-            if obj.crud.readable:
-                perms.append("R")
-            if obj.crud.updateable:
-                perms.append("U")
-            if obj.crud.deletable:
-                perms.append("D")
-            lines.append(f"  [red]\u2022 {obj.name}[/red] ({'/'.join(perms)})")
-    else:
-        lines.append("[green]No high-risk findings.[/green]")
+    if writable:
+        lines.append(f"Writable objects: {len(writable)}")
+    if proven:
+        lines.append(f"[bold red]Proven write access: {len(proven)}[/bold red]")
+        for obj in proven:
+            ops = ", ".join(obj.crud_validation.proven_operations)
+            lines.append(f"  [red]\u2022 {obj.name}[/red] ({ops})")
 
     if validated_only:
         callable_apex = [r for r in result.apex_results if r.status == ApexMethodStatus.CALLABLE and r.validated is True]
@@ -224,9 +211,7 @@ def print_proofs(result: ScanResult, validated_only: bool = False) -> None:
     for obj in proof_objects:
         if not obj.proof:
             continue
-        risk_style = RISK_COLORS.get(obj.risk, "")
-        label = f"{obj.name} ({obj.risk.value.upper()})"
-        console.print(Rule(Text(label, style=risk_style), style="dim"))
+        console.print(Rule(Text(obj.name, style="bold"), style="dim"))
 
         console.print(Text("# Metadata \u2014 confirms object is exposed and shows CRUD permissions", style="dim"))
         console.print(Text(obj.proof, style="green"), soft_wrap=True)
@@ -246,46 +231,6 @@ def print_proofs(result: ScanResult, validated_only: bool = False) -> None:
         console.print()
 
 
-def _crud_op_cell(cv: CrudValidationResult, op: str) -> str:
-    """Return a check/cross/skip for a CRUD operation."""
-    result = getattr(cv, op, None)
-    if result is None:
-        return "[dim]\u2014[/dim]"
-    return CHECK if result.success else "[red]\u2717[/red]"
-
-
-def print_crud_validation(objects: list[ObjectResult]) -> None:
-    """Print CRUD validation results table for interactive mode."""
-    validated = [o for o in objects if o.crud_validation is not None and not o.crud_validation.skipped]
-
-    if not validated:
-        console.print("[dim]No CRUD validations performed.[/dim]")
-        return
-
-    table = Table(title=f"CRUD Validation Results ({len(validated)} objects)")
-    table.add_column("Object", style="bold")
-    table.add_column("Read", justify="center")
-    table.add_column("Create", justify="center")
-    table.add_column("Update", justify="center")
-    table.add_column("Delete", justify="center")
-    table.add_column("Proven Ops", justify="left")
-
-    for obj in validated:
-        cv = obj.crud_validation
-        assert cv is not None
-        proven = ", ".join(cv.proven_operations) if cv.proven_operations else "[dim]none[/dim]"
-        table.add_row(
-            obj.name,
-            _crud_op_cell(cv, "read"),
-            _crud_op_cell(cv, "create"),
-            _crud_op_cell(cv, "update"),
-            _crud_op_cell(cv, "delete"),
-            proven,
-        )
-
-    console.print(table)
-
-
 def render(result: ScanResult, validated_only: bool = False) -> None:
     """Full rich output rendering."""
     print_banner()
@@ -296,9 +241,6 @@ def render(result: ScanResult, validated_only: bool = False) -> None:
     console.print()
     if result.apex_results:
         print_apex(result.apex_results, validated_only=validated_only)
-        console.print()
-    if result.interactive_mode:
-        print_crud_validation(result.objects)
         console.print()
     print_summary(result, validated_only=validated_only)
     console.print()

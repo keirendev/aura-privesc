@@ -17,7 +17,7 @@ from .discovery import run_discovery
 from .enumerator import build_object_list, enumerate_objects
 from .exceptions import AuraError, DiscoveryError, ReconError
 from .models import ApexMethodStatus, ScanResult
-from .interactive import run_interactive_validation
+from .crud import auto_crud_test_objects
 from .output import html_output, json_output
 from .permissions import check_soql_capability, get_config_objects, get_user_info
 
@@ -52,13 +52,13 @@ def main():
 @click.option("--skip-records", is_flag=True, help="Skip record count enumeration")
 @click.option("--skip-apex", is_flag=True, help="Skip Apex controller testing")
 @click.option("--skip-validation", is_flag=True, help="Skip finding validation (faster, may include false positives)")
+@click.option("--skip-crud-test", is_flag=True, help="Skip automated CRUD write testing")
 @click.option("--timeout", default=30, type=int, help="HTTP timeout in seconds")
 @click.option("--delay", default=0, type=int, help="Delay between requests in ms")
 @click.option("--concurrency", default=5, type=int, help="Max concurrent requests")
 @click.option("--proxy", default=None, help="HTTP proxy URL")
 @click.option("--insecure", is_flag=True, help="Disable TLS verification")
 @click.option("-v", "--verbose", is_flag=True, help="Show raw request/response data")
-@click.option("-i", "--interactive", is_flag=True, help="Interactive CRUD validation mode")
 @click.option("--report/--no-report", default=True, help="Generate HTML report (default: on)")
 @click.option("--report-dir", type=click.Path(file_okay=False), default=".", help="Directory for HTML report output")
 def scan(
@@ -73,21 +73,17 @@ def scan(
     skip_records: bool,
     skip_apex: bool,
     skip_validation: bool,
+    skip_crud_test: bool,
     timeout: int,
     delay: int,
     concurrency: int,
     proxy: str | None,
     insecure: bool,
     verbose: bool,
-    interactive: bool,
     report: bool,
     report_dir: str,
 ) -> None:
     """Run the Aura privilege escalation scan."""
-    if interactive and json_mode:
-        console.print("[red]Error:[/red] --interactive and --json cannot be used together.")
-        sys.exit(1)
-
     # Prompt for credentials when running in authenticated mode
     sid: str | None = None
     token: str | None = None
@@ -117,13 +113,13 @@ def scan(
             skip_records=skip_records,
             skip_apex=skip_apex,
             skip_validation=skip_validation,
+            skip_crud_test=skip_crud_test,
             timeout=timeout,
             delay=delay,
             concurrency=concurrency,
             proxy=proxy,
             insecure=insecure,
             verbose=verbose,
-            interactive=interactive,
             report=report,
             report_dir=report_dir,
         )
@@ -224,13 +220,13 @@ async def _run(
     skip_records: bool,
     skip_apex: bool,
     skip_validation: bool,
+    skip_crud_test: bool = False,
     timeout: int,
     delay: int,
     concurrency: int,
     proxy: str | None,
     insecure: bool,
     verbose: bool,
-    interactive: bool = False,
     report: bool = True,
     report_dir: str = ".",
 ) -> None:
@@ -314,6 +310,28 @@ async def _run(
                 task_id=tid,
             )
 
+        # Phase 3b: Automated CRUD write testing
+        if not skip_crud_test:
+            writable = [o for o in result.objects if o.accessible and o.crud.readable and o.crud.has_write]
+            if writable:
+                if not json_mode:
+                    console.print(
+                        f"[cyan]Phase 3b:[/cyan] CRUD write testing on {len(writable)} writable objects...",
+                        highlight=False,
+                    )
+                with Progress(
+                    "[progress.description]{task.description}",
+                    BarColumn(),
+                    MofNCompleteColumn(),
+                    TimeElapsedColumn(),
+                    console=console,
+                    disable=json_mode,
+                ) as progress:
+                    tid = progress.add_task("Testing CRUD writes", total=len(writable))
+                    await auto_crud_test_objects(
+                        client, writable, progress=progress, task_id=tid,
+                    )
+
         # Phase 4: Apex testing
         if not skip_apex:
             if not json_mode:
@@ -337,13 +355,6 @@ async def _run(
                         client, apex_list, skip_validation=skip_validation,
                         progress=progress, task_id=tid,
                     )
-
-        # Phase 5: Interactive CRUD validation
-        if interactive:
-            if not json_mode:
-                console.print("[cyan]Phase 5:[/cyan] Interactive CRUD validation...", highlight=False)
-            result.interactive_mode = True
-            result.objects = await run_interactive_validation(client, result.objects)
 
     validated_only = not skip_validation
 

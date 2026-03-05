@@ -7,29 +7,12 @@ import logging
 from typing import Any
 
 from .client import AuraClient
-from .config import CRITICAL_OBJECTS, DESCRIPTORS, HIGH_SENSITIVITY_OBJECTS, STANDARD_OBJECTS
-from .models import CrudPermissions, ObjectResult, RiskLevel
+from .config import DESCRIPTORS, STANDARD_OBJECTS
+from .models import CrudPermissions, ObjectResult
 from .proof import proof_for_object, proof_for_records
 from .validator import validate_object_result
 
 logger = logging.getLogger(__name__)
-
-
-def classify_risk(name: str, crud: CrudPermissions, accessible: bool) -> RiskLevel:
-    """Assign risk level based on object sensitivity and permissions."""
-    if not accessible:
-        return RiskLevel.INFO
-
-    is_critical = name in CRITICAL_OBJECTS
-    is_sensitive = name in HIGH_SENSITIVITY_OBJECTS
-
-    if is_critical and crud.has_write:
-        return RiskLevel.CRITICAL
-    if is_critical or (is_sensitive and crud.has_write):
-        return RiskLevel.HIGH
-    if is_sensitive or crud.has_write:
-        return RiskLevel.MEDIUM
-    return RiskLevel.LOW
 
 
 async def get_object_info(client: AuraClient, object_name: str) -> ObjectResult:
@@ -73,15 +56,13 @@ def _parse_object_info(name: str, resp: dict[str, Any]) -> ObjectResult:
 
     crud = CrudPermissions(
         createable=obj_info.get("createable", False),
-        readable=True,  # If we got here, it's readable
+        readable=False,  # Set to True only when getItems returns records
         updateable=obj_info.get("updateable", False),
         deletable=obj_info.get("deletable", False),
         queryable=obj_info.get("queryable", False),
     )
 
-    risk = classify_risk(name, crud, accessible=True)
-
-    return ObjectResult(name=name, accessible=True, crud=crud, risk=risk)
+    return ObjectResult(name=name, accessible=True, crud=crud)
 
 
 async def get_record_count(client: AuraClient, object_name: str) -> int | None:
@@ -99,21 +80,27 @@ async def get_records(
             DESCRIPTORS["getItems"],
             {
                 "entityNameOrId": object_name,
-                "listViewApiName": None,
-                "getCount": True,
-                "pageSize": 10,
+                "layoutType": "FULL",
+                "pageSize": 100,
+                "currentPage": 0,
+                "useTimeout": False,
+                "getCount": False,
+                "enableRowActions": False,
             },
         )
         actions = resp.get("actions", [])
         if actions and actions[0].get("state") == "SUCCESS":
             rv = actions[0].get("returnValue", {})
-            count = rv.get("count")
-            if count is None:
-                count = rv.get("totalCount")
-            if count is not None:
-                count = int(count)
-            records = rv.get("records", [])
-            return count, records
+            # Records can be under "records" or "result" (wrapped in {record: ...})
+            records = rv.get("records") or rv.get("result") or []
+            # Unwrap {record: {...}} wrappers if present
+            unwrapped = []
+            for r in records:
+                if isinstance(r, dict) and "record" in r and len(r) == 1:
+                    unwrapped.append(r["record"])
+                else:
+                    unwrapped.append(r)
+            return len(unwrapped), unwrapped
     except Exception as e:
         logger.debug("getItems failed for %s: %s", object_name, e)
     return None, []
@@ -135,12 +122,17 @@ async def enumerate_object(
 
     if result.accessible and not skip_records:
         count, records = await get_records(client, object_name)
-        result.record_count = count
+        if records:
+            result.crud.readable = True
+            result.record_count = count
+        else:
+            result.crud.readable = False
+            result.record_count = 0
         result.sample_records = records
 
     if result.accessible:
         result.proof = proof_for_object(client, object_name)
-        if result.crud.queryable:
+        if result.crud.readable:
             result.proof_records = proof_for_records(client, object_name)
 
     if result.accessible and not skip_validation:

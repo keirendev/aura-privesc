@@ -87,18 +87,6 @@ STANDARD_OBJECTS = [
     "WorkOrderLineItem",
 ]
 
-# Objects that are considered high-value / sensitive for risk classification
-CRITICAL_OBJECTS = {
-    "User", "Account", "Contact", "PermissionSet", "PermissionSetAssignment",
-    "Organization", "Profile", "UserRole",
-}
-
-HIGH_SENSITIVITY_OBJECTS = {
-    "Case", "Contract", "EmailMessage", "Lead", "Opportunity",
-    "ContentDocument", "ContentVersion", "Document", "Individual",
-    "LiveChatTranscript",
-}
-
 # Common Apex controllers found in communities
 COMMON_APEX_CONTROLLERS = [
     "LightningLoginFormController.login",

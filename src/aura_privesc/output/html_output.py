@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from ..models import ApexMethodStatus, RiskLevel, ScanResult
+from ..models import ApexMethodStatus, ObjectResult, RiskLevel, ScanResult
 
 _CSS = """\
 :root{--bg:#1a1a2e;--card:#16213e;--border:#0f3460;--text:#e0e0e0;--muted:#888;
@@ -140,8 +140,8 @@ document.addEventListener('DOMContentLoaded',function(){
 /* --- Build curl command and copy to clipboard --- */
 function fireAura(descriptor,params){
   if(typeof AURA==='undefined')return;
-  var msg=JSON.stringify({actions:[{id:'0',descriptor:descriptor,callingDescriptor:'UNKNOWN',params:params}]});
-  var body='message='+encodeURIComponent(msg)+'&aura.context='+encodeURIComponent(AURA.context)+'&aura.pageURI=/s/&aura.token='+encodeURIComponent(AURA.token);
+  var msg=JSON.stringify({actions:[{id:'123;a',descriptor:descriptor,callingDescriptor:'UNKNOWN',params:params}]});
+  var body='message='+msg+'&aura.context='+encodeURIComponent(AURA.context)+'&aura.pageURI=/s/&aura.token='+encodeURIComponent(AURA.token);
   var cmd="curl -k --proxy http://127.0.0.1:8080 -X POST '"+AURA.url+"' -H 'Content-Type: application/x-www-form-urlencoded'";
   if(AURA.sid)cmd+=" -H 'Cookie: sid="+AURA.sid+"'";
   cmd+=" -d '"+body.replace(/'/g,"'\\''")+"' | python3 -m json.tool";
@@ -185,6 +185,16 @@ def _op_cell(cv, op: str) -> str:
     return _check_or_cross(result.success)
 
 
+def _crud_cell(obj: ObjectResult, op: str) -> str:
+    """Three-state HTML cell for C/U/D: proven / failed / not attempted."""
+    cv = obj.crud_validation
+    if cv is not None:
+        result = getattr(cv, op, None)
+        if result is not None:
+            return _check_or_cross(result.success)
+    return '<span class="skip">&mdash;</span>'
+
+
 def _build_header(result: ScanResult, timestamp: str) -> str:
     target = _esc(result.target_url)
     mode = _esc(result.discovery.mode) if result.discovery else "unknown"
@@ -195,17 +205,17 @@ def _build_header(result: ScanResult, timestamp: str) -> str:
 
 
 def _build_summary(result: ScanResult, accessible_objects: list, callable_apex: list) -> str:
-    critical = [o for o in accessible_objects if o.risk in (RiskLevel.CRITICAL, RiskLevel.HIGH)]
-    crud_validated = result.crud_validated_objects if result.interactive_mode else []
+    writable = [o for o in accessible_objects if o.crud.has_write]
+    proven = [o for o in accessible_objects if o.crud_validation is not None and o.crud_validation.proven_operations]
 
     return f"""
 <h2>Executive Summary</h2>
 <div class="summary-grid">
   <div class="stat"><div class="stat-number">{len(result.objects)}</div><div class="stat-label">Objects Scanned</div></div>
   <div class="stat"><div class="stat-number">{len(accessible_objects)}</div><div class="stat-label">Accessible</div></div>
-  <div class="stat"><div class="stat-number" style="color:var(--red)">{len(critical)}</div><div class="stat-label">Critical / High</div></div>
+  <div class="stat"><div class="stat-number">{len(writable)}</div><div class="stat-label">Writable</div></div>
+  <div class="stat"><div class="stat-number" style="color:var(--red)">{len(proven)}</div><div class="stat-label">Proven Writes</div></div>
   <div class="stat"><div class="stat-number">{len(callable_apex)}</div><div class="stat-label">Callable Apex</div></div>
-  {"<div class='stat'><div class='stat-number'>" + str(len(crud_validated)) + "</div><div class='stat-label'>CRUD Validated</div></div>" if result.interactive_mode else ""}
 </div>
 """
 
@@ -256,7 +266,7 @@ def _build_action_buttons(obj) -> str:
     btns += (
         f'<button class="btn btn-read" '
         f"""onclick="fireAura('{get_items_desc}',"""
-        f"""{{'entityNameOrId':{js_name},'listViewApiName':null,'getCount':true,'pageSize':10}})">getItems</button>"""
+        f"""{{'entityNameOrId':{js_name},'layoutType':'FULL','pageSize':100,'currentPage':0,'useTimeout':false,'getCount':false,'enableRowActions':false}})">getItems</button>"""
     )
 
     # Create
@@ -268,7 +278,7 @@ def _build_action_buttons(obj) -> str:
     btns += (
         f'<button class="btn btn-create" '
         f"""onclick="fireAura('{create_desc}',"""
-        f"""{{'objectApiName':{js_name},'fields':{{'Name':'aura-privesc-test'}}}})">Create</button>"""
+        f"""{{'record':{{'apiName':{js_name},'fields':{{'Name':'aura-privesc-test'}}}}}})">Create</button>"""
     )
 
     # Update / Delete — use first sample record ID if available
@@ -286,7 +296,7 @@ def _build_action_buttons(obj) -> str:
     btns += (
         f'<button class="btn btn-update" '
         f"""onclick="fireAura('{update_desc}',"""
-        f"""{{'recordId':{js_id},'fields':{{'Name':'aura-privesc-updated'}}}})">Update</button>"""
+        f"""{{'record':{{'apiName':{js_name},'id':{js_id},'fields':{{'Name':'aura-privesc-updated'}}}}}})">Update</button>"""
     )
 
     delete_desc = html.escape(
@@ -307,24 +317,19 @@ def _build_objects_table(accessible_objects: list) -> str:
     if not accessible_objects:
         return "<h2>Object Findings</h2><p>No accessible objects found.</p>"
 
-    risk_order = {RiskLevel.CRITICAL: 0, RiskLevel.HIGH: 1, RiskLevel.MEDIUM: 2, RiskLevel.LOW: 3, RiskLevel.INFO: 4}
-    accessible_objects.sort(key=lambda o: (risk_order.get(o.risk, 99), o.name))
+    accessible_objects.sort(key=lambda o: o.name)
 
     rows = ""
-    ncols = 8
+    ncols = 6
     for obj in accessible_objects:
-        c = obj.crud
         count = str(obj.record_count) if obj.record_count is not None else "-"
-        risk_val = risk_order.get(obj.risk, 99)
         rows += f"""<tr class="obj-row">
   <td>{_esc(obj.name)}</td>
-  <td>{_check_or_cross(c.readable)}</td>
-  <td>{_check_or_cross(c.createable)}</td>
-  <td>{_check_or_cross(c.updateable)}</td>
-  <td>{_check_or_cross(c.deletable)}</td>
-  <td>{_check_or_cross(c.queryable)}</td>
+  <td>{_check_or_cross(obj.crud.readable)}</td>
+  <td>{_crud_cell(obj, 'create')}</td>
+  <td>{_crud_cell(obj, 'update')}</td>
+  <td>{_crud_cell(obj, 'delete')}</td>
   <td data-val="{count}">{count}</td>
-  <td data-val="{risk_val}">{_badge(obj.risk)}</td>
 </tr>
 <tr class="expand-row"><td colspan="{ncols}">
 {_build_records_subtable(obj.sample_records)}
@@ -339,47 +344,9 @@ def _build_objects_table(accessible_objects: list) -> str:
 <thead>
 <tr>
   <th data-sort="str">Object<span class="sort-arrow"></span></th>
-  <th>R</th><th>C</th><th>U</th><th>D</th><th>Q</th>
+  <th>R</th><th>C</th><th>U</th><th>D</th>
   <th data-sort="num">Records<span class="sort-arrow"></span></th>
-  <th data-sort="num">Risk<span class="sort-arrow"></span></th>
 </tr>
-</thead>
-<tbody>
-{rows}
-</tbody>
-</table>
-</div>
-"""
-
-
-def _build_crud_validation(result: ScanResult) -> str:
-    if not result.interactive_mode:
-        return ""
-
-    validated = result.crud_validated_objects
-    if not validated:
-        return "<h2>CRUD Validation Results</h2><p>No CRUD validations performed.</p>"
-
-    rows = ""
-    for obj in validated:
-        cv = obj.crud_validation
-        assert cv is not None
-        proven = ", ".join(cv.proven_operations) if cv.proven_operations else '<span class="skip">none</span>'
-        rows += f"""<tr>
-  <td>{_esc(obj.name)}</td>
-  <td>{_op_cell(cv, 'read')}</td>
-  <td>{_op_cell(cv, 'create')}</td>
-  <td>{_op_cell(cv, 'update')}</td>
-  <td>{_op_cell(cv, 'delete')}</td>
-  <td>{proven}</td>
-</tr>"""
-
-    return f"""
-<h2>CRUD Validation Results ({len(validated)})</h2>
-<div class="card">
-<table>
-<thead>
-<tr><th>Object</th><th>Read</th><th>Create</th><th>Update</th><th>Delete</th><th>Proven Ops</th></tr>
 </thead>
 <tbody>
 {rows}
@@ -478,7 +445,6 @@ def write_report(
         _build_header(result, timestamp),
         _build_summary(result, accessible_objects, callable_apex),
         _build_objects_table(accessible_objects),
-        _build_crud_validation(result),
         _build_apex_table(callable_apex),
         _build_footer(timestamp),
     ])
