@@ -99,7 +99,9 @@ async def get_record_count(client: AuraClient, object_name: str) -> int | None:
         actions = resp.get("actions", [])
         if actions and actions[0].get("state") == "SUCCESS":
             rv = actions[0].get("returnValue", {})
-            count = rv.get("count") or rv.get("totalCount")
+            count = rv.get("count")
+            if count is None:
+                count = rv.get("totalCount")
             if count is not None:
                 return int(count)
     except Exception as e:
@@ -143,16 +145,24 @@ async def enumerate_objects(
     skip_crud: bool = False,
     skip_records: bool = False,
     skip_validation: bool = False,
+    progress=None,
+    task_id=None,
 ) -> list[ObjectResult]:
     """Enumerate all objects concurrently (bounded by client semaphore)."""
-    tasks = [
+    coros = [
         enumerate_object(
             client, name, skip_crud=skip_crud, skip_records=skip_records,
             skip_validation=skip_validation,
         )
         for name in object_names
     ]
-    return list(await asyncio.gather(*tasks))
+    results = []
+    for coro in asyncio.as_completed(coros):
+        result = await coro
+        results.append(result)
+        if progress and task_id is not None:
+            progress.update(task_id, advance=1)
+    return results
 
 
 def build_object_list(
