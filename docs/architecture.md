@@ -17,6 +17,7 @@
 | `apex.py` | Phase 4: discovers controllers from JS, tests via `call_apex` |
 | `crud.py` | Record-level CRUD operations + automated write testing (`auto_crud_test_objects`) |
 | `proof.py` | Generates reproducible curl commands for findings |
+| `recon.py` | SF CLI recon subcommand: enumerate objects and `@AuraEnabled` Apex methods via Tooling API |
 | `exceptions.py` | `AuraRequestError`, `ClientOutOfSyncError`, `InvalidSessionError`, `DiscoveryError` |
 
 ### Output modules (`src/aura_privesc/output/`)
