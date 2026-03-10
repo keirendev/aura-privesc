@@ -157,12 +157,13 @@ async def check_rest_api_access(
         if not check1.success or not version:
             return result
 
-        result.api_enabled = True
         result.api_version = version
 
         # Checks 2-6: run sequentially on whichever base worked
         check2 = await _check_soql_query(rest_http, base, version, sid, **curl_opts)
         result.checks.append(check2)
+        if check2.success:
+            result.api_enabled = True
         if check2.proof:
             result.soql_example_curl = check2.proof
 
