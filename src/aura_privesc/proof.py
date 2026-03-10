@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
@@ -10,6 +11,14 @@ if TYPE_CHECKING:
     from .client import AuraClient
 
 from .config import DESCRIPTORS
+
+_SAFE_API_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*(__[a-zA-Z]+)?$')
+
+
+def _validate_api_name(name: str) -> None:
+    """Raise ValueError if name is not a safe Salesforce API name."""
+    if not _SAFE_API_NAME.match(name):
+        raise ValueError(f"Invalid API name: {name!r}")
 
 
 def generate_curl(
@@ -104,6 +113,137 @@ def proof_for_apex(client: AuraClient, controller: str, method: str) -> str:
         aura_url=client.aura_url,
         descriptor=descriptor,
         params=params,
+        token=client.aura_token,
+        context=client._build_context(),
+        sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
+    )
+
+
+def _build_count_query(object_names: list[str]) -> str:
+    parts = "".join(f"{name}{{totalCount}}" for name in object_names)
+    return f"query getCount{{uiapi{{query{{{parts}}}}}}}"
+
+
+def _build_fields_query(object_names: list[str]) -> str:
+    names_str = ",".join(f'"{name}"' for name in object_names)
+    return (
+        f"query getFields{{uiapi{{objectInfos(apiNames:[{names_str}])"
+        f"{{apiName fields{{apiName dataType}}}}}}}}"
+    )
+
+
+def _graphql_params(query: str) -> dict:
+    op_name = ""
+    if query.strip().startswith("query "):
+        rest = query.strip()[6:]
+        op_name = rest.split("{", 1)[0].split("(", 1)[0].strip()
+    return {
+        "queryInput": {
+            "operationName": op_name,
+            "query": query,
+            "variables": {},
+        }
+    }
+
+
+def proof_for_graphql_count(client: AuraClient, object_names: list[str]) -> str:
+    """Generate a curl command for GraphQL totalCount query."""
+    query = _build_count_query(object_names)
+    return generate_curl(
+        aura_url=client.aura_url,
+        descriptor=DESCRIPTORS["executeGraphQL"],
+        params=_graphql_params(query),
+        token=client.aura_token,
+        context=client._build_context(),
+        sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
+    )
+
+
+def proof_for_graphql_fields(client: AuraClient, object_names: list[str]) -> str:
+    """Generate a curl command for GraphQL field introspection query."""
+    query = _build_fields_query(object_names)
+    return generate_curl(
+        aura_url=client.aura_url,
+        descriptor=DESCRIPTORS["executeGraphQL"],
+        params=_graphql_params(query),
+        token=client.aura_token,
+        context=client._build_context(),
+        sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
+    )
+
+
+def _build_record_query(object_name: str, fields: list[str]) -> str:
+    """Build a GraphQL record fetch query for proof generation."""
+    _validate_api_name(object_name)
+    for f in fields:
+        _validate_api_name(f)
+    field_nodes = " ".join(f"{f}{{value}}" for f in fields)
+    return (
+        f"query getRecords{{uiapi{{query{{{object_name}(first:10)"
+        f"{{edges{{node{{{field_nodes}}}cursor}}pageInfo{{hasNextPage endCursor}}totalCount}}}}}}}}"
+    )
+
+
+def _build_filtered_record_query(
+    object_name: str, fields: list[str], where: dict[str, dict[str, str]]
+) -> str:
+    """Build a filtered GraphQL query for proof generation."""
+    _validate_api_name(object_name)
+    for f in fields:
+        _validate_api_name(f)
+    field_nodes = " ".join(f"{f}{{value}}" for f in fields)
+
+    where_parts = []
+    for field_name, conditions in where.items():
+        _validate_api_name(field_name)
+        cond_parts = []
+        for op, val in conditions.items():
+            escaped_val = str(val).replace("\\", "\\\\").replace('"', '\\"')
+            cond_parts.append(f'{op}:"{escaped_val}"')
+        where_parts.append(f"{field_name}:{{{','.join(cond_parts)}}}")
+    where_str = ",".join(where_parts)
+
+    return (
+        f"query getFiltered{{uiapi{{query{{{object_name}(first:10,where:{{{where_str}}})"
+        f"{{edges{{node{{{field_nodes}}}cursor}}pageInfo{{hasNextPage endCursor}}totalCount}}}}}}}}"
+    )
+
+
+def proof_for_graphql_records(
+    client: AuraClient, object_name: str, fields: list[str]
+) -> str:
+    """Generate a curl command for GraphQL record fetch query."""
+    query = _build_record_query(object_name, fields)
+    return generate_curl(
+        aura_url=client.aura_url,
+        descriptor=DESCRIPTORS["executeGraphQL"],
+        params=_graphql_params(query),
+        token=client.aura_token,
+        context=client._build_context(),
+        sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
+    )
+
+
+def proof_for_graphql_filtered(
+    client: AuraClient,
+    object_name: str,
+    fields: list[str],
+    where: dict[str, dict[str, str]],
+) -> str:
+    """Generate a curl command for a filtered GraphQL query."""
+    query = _build_filtered_record_query(object_name, fields, where)
+    return generate_curl(
+        aura_url=client.aura_url,
+        descriptor=DESCRIPTORS["executeGraphQL"],
+        params=_graphql_params(query),
         token=client.aura_token,
         context=client._build_context(),
         sid=client.sid,

@@ -14,6 +14,10 @@ dependencies = [
     "h2>=4.0",
     "rich>=13.0",
     "pydantic>=2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.20",
 ]
 
 [project.scripts]
@@ -21,3 +25,6 @@ aura-privesc = "aura_privesc.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"aura_privesc.web" = ["static/**/*"]

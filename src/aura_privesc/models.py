@@ -85,6 +85,30 @@ class ApexResult(BaseModel):
     validation_detail: str | None = None
 
 
+class GraphQLFieldInfo(BaseModel):
+    name: str
+    data_type: str
+
+
+class GraphQLResult(BaseModel):
+    object_name: str
+    total_count: int | None = None
+    fields: list[GraphQLFieldInfo] = []
+    error: str | None = None
+    proof_count: str | None = None
+    proof_fields: str | None = None
+
+
+class GraphQLRecordPage(BaseModel):
+    """Page of records returned by GraphQL record fetch."""
+
+    object_name: str
+    records: list[dict] = []
+    next_cursor: str | None = None
+    has_next: bool = False
+    total_count: int | None = None
+
+
 class UserInfo(BaseModel):
     user_id: str | None = None
     username: str | None = None
@@ -107,6 +131,8 @@ class ScanResult(BaseModel):
     soql_capable: bool = False
     objects: list[ObjectResult] = []
     apex_results: list[ApexResult] = []
+    graphql_available: bool = False
+    graphql_results: list[GraphQLResult] = []
 
     aura_url: str | None = None
     aura_token: str | None = None

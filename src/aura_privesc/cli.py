@@ -5,32 +5,34 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import webbrowser
 
 import click
 from rich.console import Console
 from rich.progress import Progress, BarColumn, MofNCompleteColumn, TimeElapsedColumn
 
 from . import __version__
-from .apex import build_apex_list, discover_apex_from_js, test_apex_methods
-from .client import AuraClient
-from .discovery import run_discovery
-from .enumerator import build_object_list, enumerate_objects
+from .engine import ScanConfig, ScanEngine
 from .exceptions import AuraError, DiscoveryError, ReconError
 from .models import ApexMethodStatus, ScanResult
-from .crud import auto_crud_test_objects
 from .output import html_output, json_output
-from .permissions import check_soql_capability, get_config_objects, get_user_info
 
 console = Console(stderr=True)
 
 
 class DefaultGroup(click.Group):
-    """Falls back to 'scan' when no subcommand matches."""
+    """Falls back to 'serve' when no subcommand matches, or 'scan' when flags present."""
 
     def parse_args(self, ctx, args):
-        # Let --help and --version be handled by the group itself
         if args and args[0] not in self.commands and args[0] not in ("--help", "-h", "--version"):
-            args = ["scan"] + list(args)
+            # If first arg starts with - or is -u, it's a scan invocation
+            if args[0].startswith("-"):
+                args = ["scan"] + list(args)
+            else:
+                args = ["scan"] + list(args)
+        elif not args:
+            # No args at all -> serve
+            args = ["serve"]
         return super().parse_args(ctx, args)
 
 
@@ -53,6 +55,7 @@ def main():
 @click.option("--skip-apex", is_flag=True, help="Skip Apex controller testing")
 @click.option("--skip-validation", is_flag=True, help="Skip finding validation (faster, may include false positives)")
 @click.option("--skip-crud-test", is_flag=True, help="Skip automated CRUD write testing")
+@click.option("--skip-graphql", is_flag=True, help="Skip GraphQL enumeration (record counts and field introspection)")
 @click.option("--timeout", default=30, type=int, help="HTTP timeout in seconds")
 @click.option("--delay", default=0, type=int, help="Delay between requests in ms")
 @click.option("--concurrency", default=5, type=int, help="Max concurrent requests")
@@ -74,6 +77,7 @@ def scan(
     skip_apex: bool,
     skip_validation: bool,
     skip_crud_test: bool,
+    skip_graphql: bool,
     timeout: int,
     delay: int,
     concurrency: int,
@@ -99,31 +103,102 @@ def scan(
     else:
         logging.basicConfig(level=logging.WARNING)
 
-    asyncio.run(
-        _run(
-            url=url,
-            token=token,
-            sid=sid,
-            manual_context=manual_context,
-            manual_endpoint=manual_endpoint,
-            objects_file=objects_file,
-            apex_file=apex_file,
-            json_mode=json_mode,
-            skip_crud=skip_crud,
-            skip_records=skip_records,
-            skip_apex=skip_apex,
-            skip_validation=skip_validation,
-            skip_crud_test=skip_crud_test,
-            timeout=timeout,
-            delay=delay,
-            concurrency=concurrency,
-            proxy=proxy,
-            insecure=insecure,
-            verbose=verbose,
-            report=report,
-            report_dir=report_dir,
-        )
+    config = ScanConfig(
+        url=url,
+        token=token,
+        sid=sid,
+        manual_context=manual_context,
+        manual_endpoint=manual_endpoint,
+        objects_file=objects_file,
+        apex_file=apex_file,
+        skip_crud=skip_crud,
+        skip_records=skip_records,
+        skip_apex=skip_apex,
+        skip_validation=skip_validation,
+        skip_crud_test=skip_crud_test,
+        skip_graphql=skip_graphql,
+        timeout=timeout,
+        delay=delay,
+        concurrency=concurrency,
+        proxy=proxy,
+        insecure=insecure,
+        verbose=verbose,
     )
+
+    asyncio.run(
+        _run_cli_scan(config, json_mode=json_mode, report=report, report_dir=report_dir)
+    )
+
+
+async def _run_cli_scan(
+    config: ScanConfig,
+    *,
+    json_mode: bool = False,
+    report: bool = True,
+    report_dir: str = ".",
+) -> None:
+    """Run scan with Rich progress output."""
+    _progress_state: dict = {"bar": None, "task_id": None, "phase": None}
+
+    # Rich progress bar — create one per phase
+    progress_bars: dict[str, Progress] = {}
+
+    async def on_progress(phase: str, current: int, total: int, detail: str) -> None:
+        if json_mode:
+            return
+
+        # Phase message
+        if detail and (phase != _progress_state.get("phase") or current == 0):
+            phase_labels = {
+                "discovery": "Phase 1",
+                "user_context": "Phase 2",
+                "enumeration": "Phase 3",
+                "crud_test": "Phase 3b",
+                "apex": "Phase 4",
+                "graphql": "Phase 5",
+                "complete": "Done",
+            }
+            label = phase_labels.get(phase, phase)
+            console.print(f"[cyan]{label}:[/cyan] {detail}", highlight=False)
+            _progress_state["phase"] = phase
+
+    try:
+        engine = ScanEngine(config, on_progress=on_progress)
+        result = await engine.run()
+    except DiscoveryError as e:
+        if json_mode:
+            result = ScanResult(target_url=config.url)
+            json_output.render(result, validated_only=not config.skip_validation)
+        else:
+            console.print(f"[red]Discovery failed:[/red] {e}")
+        sys.exit(1)
+
+    validated_only = not config.skip_validation
+
+    if json_mode:
+        json_output.render(result, validated_only=validated_only)
+    else:
+        # Summary stats
+        accessible = result.validated_objects if validated_only else result.accessible_objects
+        callable_apex = [
+            r for r in result.apex_results
+            if r.status == ApexMethodStatus.CALLABLE and (not validated_only or r.validated is True)
+        ]
+        gql_count = len(result.graphql_results) if result.graphql_available else 0
+
+        console.print()
+        summary_parts = [
+            f"{len(accessible)} accessible objects",
+            f"{len(callable_apex)} callable Apex methods",
+        ]
+        if gql_count:
+            summary_parts.append(f"{gql_count} GraphQL-enumerated objects")
+        console.print(f"[green]Scan complete:[/green] " + ", ".join(summary_parts))
+
+        # HTML report
+        if report:
+            report_path = html_output.write_report(result, output_dir=report_dir, validated_only=validated_only)
+            console.print(f"[green]Report:[/green] {report_path}")
 
 
 @main.command()
@@ -206,186 +281,37 @@ def recon(
         sys.exit(1)
 
 
-async def _run(
-    *,
-    url: str,
-    token: str | None,
-    sid: str | None = None,
-    manual_context: str | None,
-    manual_endpoint: str | None,
-    objects_file: str | None,
-    apex_file: str | None,
-    json_mode: bool,
-    skip_crud: bool,
-    skip_records: bool,
-    skip_apex: bool,
-    skip_validation: bool,
-    skip_crud_test: bool = False,
-    timeout: int,
-    delay: int,
-    concurrency: int,
-    proxy: str | None,
-    insecure: bool,
-    verbose: bool,
-    report: bool = True,
-    report_dir: str = ".",
-) -> None:
-    base_url = url.rstrip("/")
-    result = ScanResult(target_url=base_url)
+@main.command()
+@click.option("--port", default=8888, type=int, help="Port to serve on")
+@click.option("--no-browser", is_flag=True, help="Don't open browser automatically")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+def serve(port: int, no_browser: bool, host: str) -> None:
+    """Start the web UI."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Error:[/red] Web UI requires extra dependencies. Install with:")
+        console.print("  pip install 'aura-privesc[web]'")
+        sys.exit(1)
 
-    async with AuraClient(
-        base_url=base_url,
-        endpoint="/s/sfsites/aura",  # placeholder, discovery will update
-        token=token,
-        concurrency=concurrency,
-        delay_ms=delay,
-        timeout=timeout,
-        proxy=proxy,
-        insecure=insecure,
-        verbose=verbose,
-        sid=sid,
-    ) as client:
-        # Phase 1: Discovery
-        if not json_mode:
-            console.print("[cyan]Phase 1:[/cyan] Discovery...", highlight=False)
+    if host != "127.0.0.1":
+        console.print("[yellow]WARNING: Binding to non-localhost. API has no authentication.[/yellow]")
 
-        try:
-            discovery = await run_discovery(
-                client,
-                base_url,
-                manual_endpoint=manual_endpoint,
-                manual_context=manual_context,
-            )
-            result.discovery = discovery
-            result.aura_url = client.aura_url
-            result.aura_token = client.aura_token
-            result.aura_context = client._build_context()
-            result.sid = client.sid
-        except DiscoveryError as e:
-            if json_mode:
-                result.discovery = None
-                json_output.render(result, validated_only=not skip_validation)
-            else:
-                console.print(f"[red]Discovery failed:[/red] {e}")
-            sys.exit(1)
+    console.print(f"[cyan]Starting aura-privesc web UI on http://{host}:{port}[/cyan]")
 
-        # Phase 2: User context + SOQL check
-        if not json_mode:
-            console.print("[cyan]Phase 2:[/cyan] Connectivity & user context...", highlight=False)
+    if not no_browser:
+        # Open browser after a short delay to let server start
+        import threading
+        def _open():
+            import time
+            time.sleep(1)
+            webbrowser.open(f"http://{host}:{port}")
+        threading.Thread(target=_open, daemon=True).start()
 
-        result.user_info = await get_user_info(client)
-        result.soql_capable = await check_soql_capability(client)
-
-        # Gather discovered objects from config
-        config_objects = await get_config_objects(client)
-
-        # Phase 3: Object enumeration
-        user_objects = _load_lines(objects_file) if objects_file else None
-        all_objects = build_object_list(config_objects, user_objects)
-
-        validation_tag = " (with validation)" if not skip_validation else ""
-
-        if not json_mode:
-            console.print(
-                f"[cyan]Phase 3:[/cyan] Enumerating {len(all_objects)} objects{validation_tag}...",
-                highlight=False,
-            )
-
-        with Progress(
-            "[progress.description]{task.description}",
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            console=console,
-            disable=json_mode,
-        ) as progress:
-            tid = progress.add_task("Enumerating objects", total=len(all_objects))
-            result.objects = await enumerate_objects(
-                client,
-                all_objects,
-                skip_crud=skip_crud,
-                skip_records=skip_records,
-                skip_validation=skip_validation,
-                progress=progress,
-                task_id=tid,
-            )
-
-        # Phase 3b: Automated CRUD write testing
-        if not skip_crud_test:
-            writable = [o for o in result.objects if o.accessible and o.crud.readable and o.crud.has_write]
-            if writable:
-                if not json_mode:
-                    console.print(
-                        f"[cyan]Phase 3b:[/cyan] CRUD write testing on {len(writable)} writable objects...",
-                        highlight=False,
-                    )
-                with Progress(
-                    "[progress.description]{task.description}",
-                    BarColumn(),
-                    MofNCompleteColumn(),
-                    TimeElapsedColumn(),
-                    console=console,
-                    disable=json_mode,
-                ) as progress:
-                    tid = progress.add_task("Testing CRUD writes", total=len(writable))
-                    await auto_crud_test_objects(
-                        client, writable, progress=progress, task_id=tid,
-                    )
-
-        # Phase 4: Apex testing
-        if not skip_apex:
-            if not json_mode:
-                console.print(f"[cyan]Phase 4:[/cyan] Apex controller testing{validation_tag}...", highlight=False)
-
-            discovered_apex = await discover_apex_from_js(client, base_url)
-            user_apex = _load_lines(apex_file) if apex_file else None
-            apex_list = build_apex_list(discovered_apex, user_apex)
-
-            if apex_list:
-                with Progress(
-                    "[progress.description]{task.description}",
-                    BarColumn(),
-                    MofNCompleteColumn(),
-                    TimeElapsedColumn(),
-                    console=console,
-                    disable=json_mode,
-                ) as progress:
-                    tid = progress.add_task("Testing Apex methods", total=len(apex_list))
-                    result.apex_results = await test_apex_methods(
-                        client, apex_list, skip_validation=skip_validation,
-                        progress=progress, task_id=tid,
-                    )
-
-    validated_only = not skip_validation
-
-    if json_mode:
-        json_output.render(result, validated_only=validated_only)
-    else:
-        # Summary stats
-        accessible = result.validated_objects if validated_only else result.accessible_objects
-        callable_apex = [
-            r for r in result.apex_results
-            if r.status == ApexMethodStatus.CALLABLE and (not validated_only or r.validated is True)
-        ]
-        console.print()
-        console.print(
-            f"[green]Scan complete:[/green] "
-            f"{len(accessible)} accessible objects, "
-            f"{len(callable_apex)} callable Apex methods"
-        )
-
-        # HTML report
-        if report:
-            report_path = html_output.write_report(result, output_dir=report_dir, validated_only=validated_only)
-            console.print(f"[green]Report:[/green] {report_path}")
-
-
-def _load_lines(path: str) -> list[str]:
-    """Load non-empty, non-comment lines from a file."""
-    lines = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                lines.append(line)
-    return lines
+    uvicorn.run(
+        "aura_privesc.web.app:create_app",
+        factory=True,
+        host=host,
+        port=port,
+        log_level="info",
+    )

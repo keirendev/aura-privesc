@@ -86,8 +86,65 @@ When updating Aura protocol details (action ID, params, encoding), update ALL of
 - [ ] `proof.py:proof_for_records()`
 - [ ] `output/html_output.py:_build_action_buttons()` — getItems button onclick
 
+### executeGraphQL params
+- [ ] `graphql.py:_graphql_params()` — builds `queryInput` with `operationName`, `query`, `variables`
+- [ ] `graphql.py:_build_count_query()` — totalCount query format
+- [ ] `graphql.py:_build_fields_query()` — objectInfos introspection query format
+- [ ] `graphql.py:_build_record_query()` — record fetch with cursor pagination
+- [ ] `graphql.py:_build_filtered_query()` — filtered record queries with where clauses
+- [ ] `graphql.py:_build_relationship_query()` — relationship traversal queries
+- [ ] `proof.py:_graphql_params()` / `_build_count_query()` / `_build_fields_query()` — duplicated for proof generation
+- [ ] `proof.py:_build_record_query()` / `_build_filtered_record_query()` — duplicated for proof generation
+- [ ] `output/html_output.py:_build_graphql_table()` — Count button onclick handler
+- [ ] `frontend/src/lib/curl.ts:buildFireAuraCurl()` — TypeScript curl generation in React UI
+
+## GraphQL not available
+
+**Symptoms:** Phase 5 reports "executeGraphQL not available on this target".
+
+**Cause:** The `aura://RecordUiController/ACTION$executeGraphQL` descriptor is not exposed on all Salesforce instances. Some orgs disable it or the guest user profile may not have access.
+
+**Fix:** This is expected on some targets. Use `--skip-graphql` to skip the phase and avoid the probe request.
+
+## GraphQL OPERATION_TOO_LARGE
+
+**Symptoms:** GraphQL count queries fail with `OPERATION_TOO_LARGE` error.
+
+**Cause:** Too many objects in a single batched query. The scanner uses 10 objects per batch, but some targets have lower limits.
+
+**Fix:** The scanner automatically retries failed batches individually. If this happens frequently, the counts will still be retrieved but more slowly.
+
 ### Message encoding
 - [ ] `client.py:_encode_form()` — raw message, percent-encoded context/token
 - [ ] `client.py:_build_message()` — compact JSON separators
 - [ ] `proof.py:generate_curl()` — raw message in curl body
 - [ ] `output/html_output.py:fireAura()` — JavaScript: `msg` not `encodeURIComponent(msg)`
+- [ ] `frontend/src/lib/curl.ts:buildFireAuraCurl()` — TypeScript port uses same encoding
+
+### Input validation (GraphQL)
+- [ ] `graphql.py:_validate_api_name()` — `_SAFE_API_NAME` regex for object/field names
+- [ ] `proof.py:_validate_api_name()` — same regex, duplicated
+
+## Web UI troubleshooting
+
+### Web UI doesn't load
+
+**Symptoms:** `aura-privesc serve` starts but browser shows a placeholder page.
+
+**Fix:** Build the React frontend:
+```bash
+cd frontend && npm install && npm run build
+```
+
+### Port already in use
+
+**Fix:** Use a different port: `aura-privesc serve --port 9999`
+
+### Non-localhost access
+
+By default, the web UI binds to `127.0.0.1` only. To allow network access:
+```bash
+aura-privesc serve --host 0.0.0.0
+```
+
+**Warning:** The API has no authentication. Only bind to non-localhost on trusted networks.

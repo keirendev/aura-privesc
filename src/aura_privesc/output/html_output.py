@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from ..models import ApexMethodStatus, ObjectResult, RiskLevel, ScanResult
+from ..models import ApexMethodStatus, GraphQLResult, ObjectResult, RiskLevel, ScanResult
 
 _CSS = """\
 :root{--bg:#1a1a2e;--card:#16213e;--border:#0f3460;--text:#e0e0e0;--muted:#888;
@@ -204,9 +204,19 @@ def _build_header(result: ScanResult, timestamp: str) -> str:
 """
 
 
-def _build_summary(result: ScanResult, accessible_objects: list, callable_apex: list) -> str:
+def _build_summary(
+    result: ScanResult,
+    accessible_objects: list,
+    callable_apex: list,
+    graphql_results: list[GraphQLResult] | None = None,
+) -> str:
     writable = [o for o in accessible_objects if o.crud.has_write]
     proven = [o for o in accessible_objects if o.crud_validation is not None and o.crud_validation.proven_operations]
+
+    gql_card = ""
+    if result.graphql_available and graphql_results:
+        gql_with_counts = [r for r in graphql_results if r.total_count is not None]
+        gql_card = f'<div class="stat"><div class="stat-number">{len(gql_with_counts)}</div><div class="stat-label">GraphQL Counted</div></div>'
 
     return f"""
 <h2>Executive Summary</h2>
@@ -216,6 +226,7 @@ def _build_summary(result: ScanResult, accessible_objects: list, callable_apex: 
   <div class="stat"><div class="stat-number">{len(writable)}</div><div class="stat-label">Writable</div></div>
   <div class="stat"><div class="stat-number" style="color:var(--red)">{len(proven)}</div><div class="stat-label">Proven Writes</div></div>
   <div class="stat"><div class="stat-number">{len(callable_apex)}</div><div class="stat-label">Callable Apex</div></div>
+  {gql_card}
 </div>
 """
 
@@ -403,6 +414,71 @@ def _build_apex_table(callable_apex: list) -> str:
 """
 
 
+def _build_graphql_table(graphql_results: list[GraphQLResult], graphql_available: bool) -> str:
+    if not graphql_available or not graphql_results:
+        return ""
+
+    graphql_results_sorted = sorted(graphql_results, key=lambda r: r.object_name)
+
+    rows = ""
+    for r in graphql_results_sorted:
+        count = str(r.total_count) if r.total_count is not None else "-"
+        n_fields = str(len(r.fields)) if r.fields else "-"
+
+        # Build field details for expandable row
+        field_details = ""
+        if r.fields:
+            field_rows = "".join(
+                f"<tr><td>{_esc(f.name)}</td><td>{_esc(f.data_type)}</td></tr>"
+                for f in sorted(r.fields, key=lambda f: f.name)
+            )
+            field_details = (
+                f'<table class="records-table"><thead><tr><th>Field</th><th>Type</th></tr></thead>'
+                f"<tbody>{field_rows}</tbody></table>"
+            )
+        else:
+            field_details = '<p style="color:var(--muted);font-size:.85rem">No field data.</p>'
+
+        # Count fire button
+        js_name = html.escape(json.dumps(r.object_name), quote=True)
+        count_query = f"query getCount{{{{uiapi{{{{query{{{{{_esc(r.object_name)}{{{{totalCount}}}}}}}}}}}}}}}}"
+        fire_btn = (
+            f'<button class="btn btn-fire" '
+            f"""onclick="fireAura('aura://RecordUiController/ACTION$executeGraphQL',"""
+            f"""{{'queryInput':{{'operationName':'getCount','query':'query getCount{{uiapi{{query{{{_esc(r.object_name)}{{totalCount}}}}}}}}','variables':{{}}}}}})">Count</button>"""
+        )
+
+        rows += f"""<tr class="obj-row">
+  <td>{_esc(r.object_name)}</td>
+  <td data-val="{count}">{count}</td>
+  <td>{n_fields}</td>
+  <td>{fire_btn}</td>
+</tr>
+<tr class="expand-row"><td colspan="4">
+{field_details}
+</td></tr>"""
+
+    return f"""
+<h2>GraphQL Enumeration ({len(graphql_results)} objects)</h2>
+<input class="search-box" data-table="graphql-table" type="text" placeholder="Filter objects\u2026">
+<div class="card">
+<table id="graphql-table">
+<thead>
+<tr>
+  <th data-sort="str">Object<span class="sort-arrow"></span></th>
+  <th data-sort="num">Record Count<span class="sort-arrow"></span></th>
+  <th data-sort="num">Fields<span class="sort-arrow"></span></th>
+  <th>Action</th>
+</tr>
+</thead>
+<tbody>
+{rows}
+</tbody>
+</table>
+</div>
+"""
+
+
 def _build_footer(timestamp: str) -> str:
     return f"""
 <footer>
@@ -443,9 +519,10 @@ def write_report(
 
     body = "".join([
         _build_header(result, timestamp),
-        _build_summary(result, accessible_objects, callable_apex),
+        _build_summary(result, accessible_objects, callable_apex, result.graphql_results),
         _build_objects_table(accessible_objects),
         _build_apex_table(callable_apex),
+        _build_graphql_table(result.graphql_results, result.graphql_available),
         _build_footer(timestamp),
     ])
 
