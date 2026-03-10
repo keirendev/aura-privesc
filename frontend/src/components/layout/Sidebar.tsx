@@ -1,10 +1,11 @@
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Plus, History, Shield } from 'lucide-react'
+import { LayoutDashboard, Plus, Search, History, Shield } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/scan/new', icon: Plus, label: 'New Scan' },
+  { to: '/recon', icon: Search, label: 'Recon' },
   { to: '/history', icon: History, label: 'History' },
 ]
 

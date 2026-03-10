@@ -199,6 +199,7 @@ export interface ScanCreateRequest {
   manual_endpoint?: string | null
   objects_list?: string[] | null
   apex_list?: string[] | null
+  recon_id?: string | null
   skip_crud?: boolean
   skip_records?: boolean
   skip_apex?: boolean
@@ -212,4 +213,49 @@ export interface ScanCreateRequest {
   insecure?: boolean
   verbose?: boolean
   crm_domain?: string | null
+}
+
+export interface ReconCreateRequest {
+  instance_url: string
+  alias: string
+  access_token: string
+  skip_objects?: boolean
+  skip_apex?: boolean
+}
+
+export interface ReconStatus {
+  id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  phase: string
+  phase_detail: string
+  error: string | null
+}
+
+export interface ReconSummary {
+  id: string
+  instance_url: string
+  alias: string | null
+  status: string
+  username: string | null
+  object_count: number | null
+  apex_count: number | null
+  created_at: string
+  finished_at: string | null
+}
+
+export interface ReconDetail {
+  id: string
+  instance_url: string
+  alias: string | null
+  status: string
+  phase: string
+  phase_detail: string
+  username: string | null
+  objects: string[] | null
+  apex: string[] | null
+  error: string | null
+  skip_objects: boolean
+  skip_apex: boolean
+  created_at: string
+  finished_at: string | null
 }

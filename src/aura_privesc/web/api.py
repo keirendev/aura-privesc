@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import delete, select, update
 
 from ..engine import ScanConfig
-from .db import Scan, get_session
+from .db import Recon, Scan, get_session
 from .jobs import JobManager
 from .schemas import (
     GraphQLExploreRequest,
@@ -19,6 +19,10 @@ from .schemas import (
     GraphQLRecordsRequest,
     GraphQLWriteTestRequest,
     PresetConfig,
+    ReconCreate,
+    ReconDetail,
+    ReconStatus,
+    ReconSummary,
     ScanCreate,
     ScanDetail,
     ScanStatus,
@@ -95,6 +99,20 @@ async def create_scan(body: ScanCreate) -> ScanDetail:
     # Check for already running scan
     if job_manager.running_scan_id:
         raise HTTPException(409, "A scan is already running")
+
+    # Resolve recon lists if recon_id provided
+    if body.recon_id and not body.objects_list and not body.apex_list:
+        async with await get_session() as session:
+            result = await session.execute(select(Recon).where(Recon.id == body.recon_id))
+            recon = result.scalar_one_or_none()
+        if not recon:
+            raise HTTPException(404, "Recon not found")
+        if recon.status != "completed":
+            raise HTTPException(400, "Recon must be completed")
+        if recon.objects_json:
+            body.objects_list = json.loads(recon.objects_json)
+        if recon.apex_json:
+            body.apex_list = json.loads(recon.apex_json)
 
     scan_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -243,10 +261,18 @@ async def get_scan_status(scan_id: str) -> ScanStatus:
     )
 
 
+@router.post("/scans/{scan_id}/cancel")
+async def cancel_scan(scan_id: str) -> dict:
+    cancelled = await job_manager.cancel(scan_id)
+    if not cancelled:
+        raise HTTPException(400, "Scan is not running")
+    return {"cancelled": scan_id}
+
+
 @router.delete("/scans/{scan_id}")
 async def delete_scan(scan_id: str) -> dict:
     # Cancel if running
-    job_manager.cancel(scan_id)
+    await job_manager.cancel(scan_id)
 
     async with await get_session() as session:
         result = await session.execute(select(Scan).where(Scan.id == scan_id))
@@ -257,6 +283,160 @@ async def delete_scan(scan_id: str) -> dict:
         await session.commit()
 
     return {"deleted": scan_id}
+
+
+# --- Recon ---
+
+
+@router.get("/recons/check-cli")
+async def check_recon_cli() -> dict:
+    """Check if sf CLI is installed."""
+    from ..recon import check_sf_cli
+    try:
+        path = check_sf_cli()
+        return {"installed": True, "path": path}
+    except Exception as e:
+        return {"installed": False, "error": str(e)}
+
+
+@router.post("/recons")
+async def create_recon(body: ReconCreate) -> ReconDetail:
+    if job_manager.running_recon_id:
+        raise HTTPException(409, "A recon job is already running")
+
+    recon_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    recon = Recon(
+        id=recon_id,
+        instance_url=body.instance_url,
+        alias=body.alias or None,
+        status="queued",
+        phase="",
+        phase_detail="",
+        skip_objects=1 if body.skip_objects else 0,
+        skip_apex=1 if body.skip_apex else 0,
+        created_at=now,
+    )
+
+    async with await get_session() as session:
+        session.add(recon)
+        await session.commit()
+
+    await job_manager.start_recon(
+        recon_id, body.instance_url, body.alias, body.access_token,
+        body.skip_objects, body.skip_apex,
+    )
+
+    return ReconDetail(
+        id=recon_id,
+        instance_url=body.instance_url,
+        alias=body.alias,
+        status="queued",
+        phase="",
+        phase_detail="",
+        skip_objects=body.skip_objects,
+        skip_apex=body.skip_apex,
+        created_at=now,
+    )
+
+
+@router.get("/recons")
+async def list_recons() -> list[ReconSummary]:
+    async with await get_session() as session:
+        result = await session.execute(
+            select(Recon).order_by(Recon.created_at.desc())
+        )
+        recons = result.scalars().all()
+
+    summaries = []
+    for r in recons:
+        obj_count = None
+        apex_count = None
+        if r.objects_json:
+            obj_count = len(json.loads(r.objects_json))
+        if r.apex_json:
+            apex_count = len(json.loads(r.apex_json))
+        summaries.append(ReconSummary(
+            id=r.id,
+            instance_url=r.instance_url,
+            alias=r.alias,
+            status=r.status,
+            username=r.username,
+            object_count=obj_count,
+            apex_count=apex_count,
+            created_at=r.created_at,
+            finished_at=r.finished_at,
+        ))
+    return summaries
+
+
+@router.get("/recons/{recon_id}")
+async def get_recon(recon_id: str) -> ReconDetail:
+    async with await get_session() as session:
+        result = await session.execute(select(Recon).where(Recon.id == recon_id))
+        recon = result.scalar_one_or_none()
+
+    if not recon:
+        raise HTTPException(404, "Recon not found")
+
+    return ReconDetail(
+        id=recon.id,
+        instance_url=recon.instance_url,
+        alias=recon.alias,
+        status=recon.status,
+        phase=recon.phase or "",
+        phase_detail=recon.phase_detail or "",
+        username=recon.username,
+        objects=json.loads(recon.objects_json) if recon.objects_json else None,
+        apex=json.loads(recon.apex_json) if recon.apex_json else None,
+        error=recon.error,
+        skip_objects=bool(recon.skip_objects),
+        skip_apex=bool(recon.skip_apex),
+        created_at=recon.created_at,
+        finished_at=recon.finished_at,
+    )
+
+
+@router.get("/recons/{recon_id}/status")
+async def get_recon_status(recon_id: str) -> ReconStatus:
+    async with await get_session() as session:
+        result = await session.execute(select(Recon).where(Recon.id == recon_id))
+        recon = result.scalar_one_or_none()
+
+    if not recon:
+        raise HTTPException(404, "Recon not found")
+
+    return ReconStatus(
+        id=recon.id,
+        status=recon.status,
+        phase=recon.phase or "",
+        phase_detail=recon.phase_detail or "",
+        error=recon.error,
+    )
+
+
+@router.post("/recons/{recon_id}/cancel")
+async def cancel_recon(recon_id: str) -> dict:
+    cancelled = await job_manager.cancel_recon(recon_id)
+    if not cancelled:
+        raise HTTPException(400, "Recon is not running")
+    return {"cancelled": recon_id}
+
+
+@router.delete("/recons/{recon_id}")
+async def delete_recon(recon_id: str) -> dict:
+    await job_manager.cancel_recon(recon_id)
+
+    async with await get_session() as session:
+        result = await session.execute(select(Recon).where(Recon.id == recon_id))
+        recon = result.scalar_one_or_none()
+        if not recon:
+            raise HTTPException(404, "Recon not found")
+        await session.execute(delete(Recon).where(Recon.id == recon_id))
+        await session.commit()
+
+    return {"deleted": recon_id}
 
 
 # --- Live GraphQL endpoints ---

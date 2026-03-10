@@ -15,6 +15,25 @@ class Base(DeclarativeBase):
     pass
 
 
+class Recon(Base):
+    __tablename__ = "recons"
+
+    id = Column(Text, primary_key=True)
+    instance_url = Column(Text, nullable=False)
+    alias = Column(Text, default=None)
+    status = Column(Text, nullable=False, default="queued")  # queued/running/completed/failed
+    phase = Column(Text, default="")  # sf_check/login/objects/apex/complete
+    phase_detail = Column(Text, default="")
+    username = Column(Text, default=None)
+    objects_json = Column(Text, default=None)  # JSON array of object names
+    apex_json = Column(Text, default=None)  # JSON array of "Class.method" strings
+    error = Column(Text, default=None)
+    skip_objects = Column(Integer, default=0)
+    skip_apex = Column(Integer, default=0)
+    created_at = Column(Text, nullable=False)
+    finished_at = Column(Text, default=None)
+
+
 class Scan(Base):
     __tablename__ = "scans"
 

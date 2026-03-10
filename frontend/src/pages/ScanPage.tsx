@@ -8,14 +8,17 @@ import ApexTable from '../components/results/ApexTable'
 import GraphQLTable from '../components/results/GraphQLTable'
 import RestApiTable from '../components/results/RestApiTable'
 import Badge from '../components/shared/Badge'
-import { RotateCw } from 'lucide-react'
+import { RotateCw, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useCancelScan } from '../hooks/useScans'
+import { toast } from 'sonner'
 
 export default function ScanPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { data: status } = useJob(id)
   const { data: scanDetail, refetch } = useScanResult(id)
+  const cancelMut = useCancelScan()
 
   // Refetch full scan when status changes to completed
   useEffect(() => {
@@ -47,6 +50,21 @@ export default function ScanPage() {
         </div>
         <div className="flex items-center gap-3">
           {status && <Badge value={status.status} type="status" />}
+          {isRunning && id && (
+            <button
+              type="button"
+              onClick={() => cancelMut.mutate(id, {
+                onSuccess: () => toast.success('Scan cancelled'),
+                onError: () => toast.error('Failed to cancel'),
+              })}
+              disabled={cancelMut.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium cursor-pointer"
+              style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid #ef4444' }}
+            >
+              <XCircle size={12} />
+              Cancel
+            </button>
+          )}
           {(isComplete || isFailed) && scanDetail && (
             <button
               type="button"

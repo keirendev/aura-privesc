@@ -10,19 +10,26 @@ import { Play } from 'lucide-react'
 interface ScanFormProps {
   initialUrl?: string
   initialOptions?: Omit<ScanCreateRequest, 'url'>
+  initialReconId?: string
 }
 
-export default function ScanForm({ initialUrl, initialOptions }: ScanFormProps = {}) {
+export default function ScanForm({ initialUrl, initialOptions, initialReconId }: ScanFormProps = {}) {
   const navigate = useNavigate()
   const createScan = useCreateScan()
   const [url, setUrl] = useState(initialUrl || '')
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
-  const [options, setOptions] = useState<Omit<ScanCreateRequest, 'url'>>(initialOptions || {})
+  const [options, setOptions] = useState<Omit<ScanCreateRequest, 'url'>>(() => {
+    const base = initialOptions || {}
+    if (initialReconId) {
+      return { ...base, recon_id: initialReconId }
+    }
+    return base
+  })
 
   const handlePreset = (preset: PresetConfig) => {
     setSelectedPreset(preset.id)
-    const { token, sid, manual_context, manual_endpoint, proxy, insecure, crm_domain } = options
-    setOptions({ token, sid, manual_context, manual_endpoint, proxy, insecure, crm_domain, ...preset.config })
+    const { token, sid, manual_context, manual_endpoint, proxy, insecure, crm_domain, recon_id, objects_list, apex_list } = options
+    setOptions({ token, sid, manual_context, manual_endpoint, proxy, insecure, crm_domain, recon_id, objects_list, apex_list, ...preset.config })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {

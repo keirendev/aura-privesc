@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Upload, X } from 'lucide-react'
 import type { ScanCreateRequest } from '../../api/types'
+import { useRecons } from '../../hooks/useRecons'
 
 type FormData = Omit<ScanCreateRequest, 'url'>
 
@@ -11,7 +12,9 @@ export default function AdvancedOptions({
   values: FormData
   onChange: (vals: FormData) => void
 }) {
-  const hasValues = !!(values.sid || values.token || values.objects_list || values.apex_list || values.proxy || values.insecure || values.crm_domain)
+  const reconsQuery = useRecons()
+  const completedRecons = (reconsQuery.data ?? []).filter((r) => r.status === 'completed')
+  const hasValues = !!(values.sid || values.token || values.objects_list || values.apex_list || values.proxy || values.insecure || values.crm_domain || values.recon_id)
   const [open, setOpen] = useState(hasValues)
   const [objectsFileName, setObjectsFileName] = useState<string | null>(null)
   const [apexFileName, setApexFileName] = useState<string | null>(null)
@@ -105,10 +108,44 @@ export default function AdvancedOptions({
             <h4 className="text-sm font-medium" style={{ color: 'var(--cyan)' }}>
               Recon Files
             </h4>
+            {completedRecons.length > 0 && (
+              <div>
+                <label className="text-xs" style={{ color: 'var(--muted)' }}>
+                  Use recon run
+                  <select
+                    value={values.recon_id || ''}
+                    onChange={(e) => {
+                      const rid = e.target.value || null
+                      if (rid) {
+                        // Set recon_id and clear file uploads in one update
+                        onChange({ ...values, recon_id: rid, objects_list: null, apex_list: null })
+                        setObjectsFileName(null)
+                        setApexFileName(null)
+                        if (objectsInputRef.current) objectsInputRef.current.value = ''
+                        if (apexInputRef.current) apexInputRef.current.value = ''
+                      } else {
+                        setField('recon_id', null)
+                      }
+                    }}
+                    className="w-full mt-1 px-2 py-1.5 rounded text-sm"
+                    style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                  >
+                    <option value="">None — use file upload</option>
+                    {completedRecons.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.instance_url} — {r.username || 'unknown'} ({r.object_count ?? 0} objects, {r.apex_count ?? 0} apex)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
             <p className="text-xs" style={{ color: 'var(--muted)' }}>
-              Upload files from <code>aura-privesc recon</code> — one entry per line, # comments ignored.
+              {values.recon_id
+                ? 'Recon data will be used. File uploads are disabled.'
+                : 'Upload files from \'aura-privesc recon\' — one entry per line, # comments ignored.'}
             </p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3" style={{ opacity: values.recon_id ? 0.4 : 1, pointerEvents: values.recon_id ? 'none' : 'auto' }}>
               <div className="text-xs" style={{ color: 'var(--muted)' }}>
                 Objects file
                 <div className="flex items-center gap-2 mt-1">
@@ -213,8 +250,10 @@ export default function AdvancedOptions({
                 Timeout (s)
                 <input
                   type="number"
-                  value={values.timeout || 30}
-                  onChange={(e) => setField('timeout', parseInt(e.target.value) || 30)}
+                  value={values.timeout ?? ''}
+                  onChange={(e) => setField('timeout', e.target.value === '' ? undefined : parseInt(e.target.value))}
+                  onBlur={() => { if (values.timeout == null) setField('timeout', 30) }}
+                  placeholder="30"
                   className="w-full mt-1 px-2 py-1.5 rounded text-sm"
                   style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
                 />
@@ -223,8 +262,10 @@ export default function AdvancedOptions({
                 Delay (ms)
                 <input
                   type="number"
-                  value={values.delay || 0}
-                  onChange={(e) => setField('delay', parseInt(e.target.value) || 0)}
+                  value={values.delay ?? ''}
+                  onChange={(e) => setField('delay', e.target.value === '' ? undefined : parseInt(e.target.value))}
+                  onBlur={() => { if (values.delay == null) setField('delay', 0) }}
+                  placeholder="0"
                   className="w-full mt-1 px-2 py-1.5 rounded text-sm"
                   style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
                 />
@@ -233,8 +274,10 @@ export default function AdvancedOptions({
                 Concurrency
                 <input
                   type="number"
-                  value={values.concurrency || 5}
-                  onChange={(e) => setField('concurrency', parseInt(e.target.value) || 5)}
+                  value={values.concurrency ?? ''}
+                  onChange={(e) => setField('concurrency', e.target.value === '' ? undefined : parseInt(e.target.value))}
+                  onBlur={() => { if (values.concurrency == null) setField('concurrency', 5) }}
+                  placeholder="5"
                   className="w-full mt-1 px-2 py-1.5 rounded text-sm"
                   style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
                 />
