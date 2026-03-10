@@ -152,6 +152,8 @@ export interface ScanCreateRequest {
   sid?: string | null
   manual_context?: string | null
   manual_endpoint?: string | null
+  objects_list?: string[] | null
+  apex_list?: string[] | null
   skip_crud?: boolean
   skip_records?: boolean
   skip_apex?: boolean

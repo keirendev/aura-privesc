@@ -83,6 +83,8 @@ async def create_scan(body: ScanCreate) -> ScanDetail:
         sid=body.sid,
         manual_context=body.manual_context,
         manual_endpoint=body.manual_endpoint,
+        objects_list=body.objects_list,
+        apex_list=body.apex_list,
         skip_crud=body.skip_crud,
         skip_records=body.skip_records,
         skip_apex=body.skip_apex,
@@ -114,6 +116,10 @@ async def create_scan(body: ScanCreate) -> ScanDetail:
     # Don't store credentials in config_json
     if config.proxy:
         config_dict["proxy"] = config.proxy
+    if config.objects_list:
+        config_dict["objects_list"] = config.objects_list
+    if config.apex_list:
+        config_dict["apex_list"] = config.apex_list
 
     scan = Scan(
         id=scan_id,

@@ -38,6 +38,8 @@ class ScanConfig:
     manual_endpoint: str | None = None
     objects_file: str | None = None
     apex_file: str | None = None
+    objects_list: list[str] | None = None
+    apex_list: list[str] | None = None
     skip_crud: bool = False
     skip_records: bool = False
     skip_apex: bool = False
@@ -146,7 +148,7 @@ class ScanEngine:
             await self.on_progress("user_context", 1, 1, "User context complete")
 
             # Phase 3: Object enumeration
-            user_objects = _load_lines(cfg.objects_file) if cfg.objects_file else None
+            user_objects = _load_lines(cfg.objects_file) if cfg.objects_file else cfg.objects_list
             all_objects = build_object_list(config_objects, user_objects)
 
             ep3 = _EngineProgress(self.on_progress, "enumeration")
@@ -180,7 +182,7 @@ class ScanEngine:
             if not cfg.skip_apex:
                 await self.on_progress("apex", 0, 0, "Discovering Apex controllers...")
                 discovered_apex = await discover_apex_from_js(client, base_url)
-                user_apex = _load_lines(cfg.apex_file) if cfg.apex_file else None
+                user_apex = _load_lines(cfg.apex_file) if cfg.apex_file else cfg.apex_list
                 apex_list = build_apex_list(discovered_apex, user_apex)
 
                 if apex_list:

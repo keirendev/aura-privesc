@@ -14,6 +14,8 @@ class ScanCreate(BaseModel):
     sid: str | None = None
     manual_context: str | None = None
     manual_endpoint: str | None = None
+    objects_list: list[str] | None = None
+    apex_list: list[str] | None = None
     skip_crud: bool = False
     skip_records: bool = False
     skip_apex: bool = False
