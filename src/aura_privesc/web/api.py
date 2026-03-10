@@ -291,6 +291,27 @@ async def _get_scan_client(scan_id: str):
     return client
 
 
+@router.get("/scans/{scan_id}/fields/{object_name}")
+async def get_object_fields(scan_id: str, object_name: str) -> dict:
+    """Live getObjectInfo call to fetch field names/types for an object."""
+    import re
+    if not re.match(r'^[A-Za-z][A-Za-z0-9_]*$', object_name):
+        raise HTTPException(400, "Invalid object name")
+
+    from ..graphql import get_graphql_fields
+
+    client = await _get_scan_client(scan_id)
+    try:
+        fields_map = await get_graphql_fields(client, [object_name])
+        fields = fields_map.get(object_name, [])
+        return {
+            "object_name": object_name,
+            "fields": [{"name": f.name, "data_type": f.data_type} for f in fields],
+        }
+    finally:
+        await client.close()
+
+
 @router.get("/scans/{scan_id}/records/{object_name}")
 async def get_object_records(scan_id: str, object_name: str) -> dict:
     """Live getItems call to fetch records for an object."""

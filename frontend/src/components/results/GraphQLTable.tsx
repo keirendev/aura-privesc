@@ -1,16 +1,19 @@
 import { useState, useMemo } from 'react'
-import type { GraphQLResult, ScanResult } from '../../api/types'
+import type { GraphQLResult, GraphQLFieldInfo, ScanResult } from '../../api/types'
+import { getObjectFields } from '../../api/client'
 import SearchInput from '../shared/SearchInput'
 import CopyButton from '../shared/CopyButton'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, ExternalLink } from 'lucide-react'
 import { buildFireAuraCurl } from '../../lib/curl'
 
 export default function GraphQLTable({
   results,
   scanResult,
+  scanId,
 }: {
   results: GraphQLResult[]
   scanResult: ScanResult
+  scanId: string
 }) {
   const [search, setSearch] = useState('')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -78,6 +81,7 @@ export default function GraphQLTable({
                   expanded={expanded}
                   onToggle={() => toggleExpand(r.object_name)}
                   curl={curl}
+                  scanId={scanId}
                 />
               )
             })}
@@ -93,14 +97,37 @@ function GraphQLRow({
   expanded,
   onToggle,
   curl,
+  scanId,
 }: {
   result: GraphQLResult
   expanded: boolean
   onToggle: () => void
   curl: string
+  scanId: string
 }) {
+  const [fields, setFields] = useState<GraphQLFieldInfo[]>(result.fields)
+  const [fieldsLoading, setFieldsLoading] = useState(false)
+  const [fieldsError, setFieldsError] = useState<string | null>(null)
+
   const count = result.total_count != null ? result.total_count.toString() : '-'
-  const nFields = result.fields.length || '-'
+  const nFields = fields.length || '-'
+  const hasFields = fields.length > 0
+  const recordsUrl = `/scan/${scanId}/records/graphql/${result.object_name}`
+
+  const handleFetchFields = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (fieldsLoading) return
+    setFieldsLoading(true)
+    setFieldsError(null)
+    try {
+      const data = await getObjectFields(scanId, result.object_name)
+      setFields(data.fields)
+    } catch (err) {
+      setFieldsError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setFieldsLoading(false)
+    }
+  }
 
   return (
     <>
@@ -135,8 +162,44 @@ function GraphQLRow({
       {expanded && (
         <tr style={{ background: 'var(--bg)' }}>
           <td colSpan={5} className="p-4">
+            {/* Action buttons */}
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {!hasFields && (
+                <button
+                  onClick={handleFetchFields}
+                  disabled={fieldsLoading}
+                  className="px-3 py-1 rounded text-xs font-semibold cursor-pointer inline-flex items-center gap-1"
+                  style={{
+                    background: 'var(--border)',
+                    color: 'var(--text)',
+                    opacity: fieldsLoading ? 0.6 : 1,
+                  }}
+                >
+                  {fieldsLoading && <Loader2 size={12} className="animate-spin" />}
+                  Fetch Fields
+                </button>
+              )}
+              <a
+                href={recordsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="px-3 py-1 rounded text-xs font-semibold cursor-pointer inline-flex items-center gap-1 no-underline"
+                style={{ background: 'var(--border)', color: 'var(--text)' }}
+              >
+                View Records <ExternalLink size={11} />
+              </a>
+            </div>
+
+            {/* Errors */}
+            {fieldsError && (
+              <div className="mb-3 p-2 rounded text-xs" style={{ background: 'var(--card)', color: 'var(--red, #ef4444)' }}>
+                Fields: {fieldsError}
+              </div>
+            )}
+
             {/* Fields table */}
-            {result.fields.length > 0 ? (
+            {hasFields && (
               <table className="w-full text-xs mb-3">
                 <thead>
                   <tr style={{ background: 'var(--border)' }}>
@@ -145,7 +208,7 @@ function GraphQLRow({
                   </tr>
                 </thead>
                 <tbody>
-                  {[...result.fields]
+                  {[...fields]
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map((f) => (
                       <tr key={f.name} style={{ borderBottom: '1px solid var(--border)' }}>
@@ -155,10 +218,6 @@ function GraphQLRow({
                     ))}
                 </tbody>
               </table>
-            ) : (
-              <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-                No field data available.
-              </p>
             )}
 
             {/* Proof curls */}

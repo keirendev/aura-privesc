@@ -183,7 +183,7 @@ def _build_record_query(object_name: str, fields: list[str]) -> str:
     _validate_api_name(object_name)
     for f in fields:
         _validate_api_name(f)
-    field_nodes = " ".join(f"{f}{{value}}" for f in fields)
+    field_nodes = " ".join(f if f == "Id" else f"{f}{{value}}" for f in fields)
     return (
         f"query getRecords{{uiapi{{query{{{object_name}(first:10)"
         f"{{edges{{node{{{field_nodes}}}cursor}}pageInfo{{hasNextPage endCursor}}totalCount}}}}}}}}"
@@ -197,7 +197,7 @@ def _build_filtered_record_query(
     _validate_api_name(object_name)
     for f in fields:
         _validate_api_name(f)
-    field_nodes = " ".join(f"{f}{{value}}" for f in fields)
+    field_nodes = " ".join(f if f == "Id" else f"{f}{{value}}" for f in fields)
 
     where_parts = []
     for field_name, conditions in where.items():

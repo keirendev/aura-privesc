@@ -107,6 +107,7 @@ export default function ScanPage() {
             <GraphQLTable
               results={scanDetail.result.graphql_results}
               scanResult={scanDetail.result}
+              scanId={id!}
             />
           )}
 
