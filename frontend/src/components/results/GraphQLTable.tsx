@@ -1,18 +1,15 @@
 import { useState, useMemo } from 'react'
-import type { GraphQLResult, GraphQLFieldInfo, ScanResult } from '../../api/types'
+import type { GraphQLResult, GraphQLFieldInfo } from '../../api/types'
 import { getObjectFields } from '../../api/client'
 import SearchInput from '../shared/SearchInput'
 import CopyButton from '../shared/CopyButton'
 import { ChevronDown, ChevronRight, Loader2, ExternalLink } from 'lucide-react'
-import { buildFireAuraCurl } from '../../lib/curl'
 
 export default function GraphQLTable({
   results,
-  scanResult,
   scanId,
 }: {
   results: GraphQLResult[]
-  scanResult: ScanResult
   scanId: string
 }) {
   const [search, setSearch] = useState('')
@@ -55,32 +52,17 @@ export default function GraphQLTable({
               <th className="text-left px-3 py-2" style={{ color: 'var(--cyan)' }}>Object</th>
               <th className="text-right px-3 py-2" style={{ color: 'var(--cyan)' }}>Record Count</th>
               <th className="text-right px-3 py-2" style={{ color: 'var(--cyan)' }}>Fields</th>
-              <th className="text-center px-3 py-2" style={{ color: 'var(--cyan)' }}>Action</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((r) => {
               const expanded = expandedRows.has(r.object_name)
-              const countQuery = `query getCount{uiapi{query{${r.object_name}{totalCount}}}}`
-              const curl = buildFireAuraCurl(
-                scanResult,
-                'aura://RecordUiController/ACTION$executeGraphQL',
-                {
-                  queryInput: {
-                    operationName: 'getCount',
-                    query: countQuery,
-                    variables: {},
-                  },
-                },
-              )
-
               return (
                 <GraphQLRow
                   key={r.object_name}
                   result={r}
                   expanded={expanded}
                   onToggle={() => toggleExpand(r.object_name)}
-                  curl={curl}
                   scanId={scanId}
                 />
               )
@@ -96,13 +78,11 @@ function GraphQLRow({
   result,
   expanded,
   onToggle,
-  curl,
   scanId,
 }: {
   result: GraphQLResult
   expanded: boolean
   onToggle: () => void
-  curl: string
   scanId: string
 }) {
   const [fields, setFields] = useState<GraphQLFieldInfo[]>(result.fields)
@@ -142,22 +122,6 @@ function GraphQLRow({
         <td className="px-3 py-2 font-medium">{result.object_name}</td>
         <td className="text-right px-3 py-2">{count}</td>
         <td className="text-right px-3 py-2">{nFields}</td>
-        <td className="text-center px-3 py-2">
-          <button
-            onClick={async (e) => {
-              e.stopPropagation()
-              try {
-                await navigator.clipboard.writeText(curl)
-              } catch {
-                prompt('Copy curl:', curl)
-              }
-            }}
-            className="px-3 py-1 rounded text-xs font-semibold cursor-pointer"
-            style={{ background: 'var(--purple)', color: '#fff' }}
-          >
-            Count
-          </button>
-        </td>
       </tr>
       {expanded && (
         <tr style={{ background: 'var(--bg)' }}>

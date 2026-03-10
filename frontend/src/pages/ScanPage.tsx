@@ -106,7 +106,6 @@ export default function ScanPage() {
           {scanDetail.result.graphql_available && scanDetail.result.graphql_results.length > 0 && (
             <GraphQLTable
               results={scanDetail.result.graphql_results}
-              scanResult={scanDetail.result}
               scanId={id!}
             />
           )}
