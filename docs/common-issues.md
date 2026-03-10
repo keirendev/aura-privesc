@@ -39,6 +39,35 @@ Curl commands are generated in **two separate code paths**:
 
 **If you update protocol details (action ID, params, encoding), you MUST update both.** Also check `_build_action_buttons()` in html_output.py for hardcoded params in button onclick handlers.
 
+## REST API checks fail (API Enabled)
+
+**Symptoms:** REST API (API Enabled) section shows all checks failed, even with a valid SID.
+
+**Common causes:**
+
+### 1. Wrong domain
+
+REST API endpoints (`/services/data/`) are only served on the CRM domain (`*.my.salesforce.com`), not Experience Cloud domains (`*.my.site.com`, `*.force.com`). The scanner auto-derives the CRM domain from common patterns:
+
+| Target domain | Derived CRM domain |
+|---|---|
+| `acme.my.site.com` | `acme.my.salesforce.com` |
+| `acme.force.com` | `acme.my.salesforce.com` |
+| `acme.lightning.force.com` | `acme.my.salesforce.com` |
+| `acme--dev.sandbox.my.site.com` | `acme--dev.sandbox.my.salesforce.com` |
+
+If auto-derivation fails (custom domain, unusual pattern), specify the CRM domain manually:
+- CLI: `--crm-domain acme.my.salesforce.com`
+- Web UI: Advanced Options → Network → CRM Domain
+
+### 2. API Enabled not set on profile
+
+The "API Enabled" permission must be set on the user's profile. Guest users typically don't have this. This is the expected result — the check correctly reports that REST API access is not available.
+
+### 3. Authentication
+
+REST API requires `Authorization: Bearer <SID>` header. The scanner sends both the Bearer token and the `sid` cookie automatically when a SID is provided.
+
 ## HTTP/2 proxy errors (Burp Suite)
 
 **Symptoms:** Scan returns zero results when using `--proxy` with Burp Suite. Verbose output (`-v`) shows:

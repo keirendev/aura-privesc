@@ -8,7 +8,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
-from ..models import ApexMethodStatus, GraphQLResult, ObjectResult, RiskLevel, ScanResult
+from ..models import ApexMethodStatus, GraphQLResult, ObjectResult, RestApiResult, RiskLevel, ScanResult
 
 console = Console()
 
@@ -50,6 +50,11 @@ def print_discovery(result: ScanResult) -> None:
             table.add_row("Email", u.email)
 
     table.add_row("SOQL", CHECK if result.soql_capable else CROSS)
+
+    if result.rest_api:
+        table.add_row("REST API", CHECK if result.rest_api.api_enabled else CROSS)
+        if result.rest_api.api_version:
+            table.add_row("API Version", f"v{result.rest_api.api_version}")
 
     console.print(Panel(table, title="[bold]Discovery[/bold]", border_style="blue"))
 
@@ -155,6 +160,32 @@ def print_apex(results: list, validated_only: bool = False) -> None:
     console.print(table)
 
 
+def print_rest_api(rest_api: RestApiResult) -> None:
+    """Print REST API access check results."""
+    border = "green" if rest_api.api_enabled else "red"
+    status = "[green]ENABLED[/green]" if rest_api.api_enabled else "[red]DISABLED[/red]"
+
+    table = Table(show_header=True, box=None, padding=(0, 2))
+    table.add_column("Check", style="bold")
+    table.add_column("Status", justify="center")
+    table.add_column("Detail")
+
+    for check in rest_api.checks:
+        icon = CHECK if check.success else CROSS
+        detail = check.detail or check.error or ""
+        table.add_row(check.name, icon, detail)
+
+    console.print(Panel(table, title=f"[bold]REST API (API Enabled)[/bold] — {status}", border_style=border))
+
+    if rest_api.soql_example_curl:
+        from rich.syntax import Syntax
+        console.print(Panel(
+            Syntax(rest_api.soql_example_curl, "bash", theme="monokai", word_wrap=True),
+            title="[bold]SOQL Query (REST API)[/bold]",
+            border_style="green",
+        ))
+
+
 def print_graphql(graphql_results: list[GraphQLResult], graphql_available: bool) -> None:
     if not graphql_available:
         return
@@ -211,6 +242,10 @@ def print_summary(result: ScanResult, validated_only: bool = False) -> None:
         gql_with_counts = [r for r in result.graphql_results if r.total_count is not None]
         lines.append(f"GraphQL enumerated: {len(result.graphql_results)} objects, {len(gql_with_counts)} with counts")
 
+    if result.rest_api and result.rest_api.api_enabled:
+        successful = [c for c in result.rest_api.checks if c.success]
+        lines.append(f"[bold green]API Enabled: YES[/bold green] ({len(successful)}/{len(result.rest_api.checks)} checks passed)")
+
     console.print(Panel("\n".join(lines), title="[bold]Summary[/bold]", border_style="cyan"))
 
 
@@ -226,7 +261,8 @@ def print_proofs(result: ScanResult, validated_only: bool = False) -> None:
         proof_apex = [a for a in result.apex_results
                       if a.proof and a.status in (ApexMethodStatus.CALLABLE, ApexMethodStatus.DENIED)]
 
-    has_any = any(o.proof for o in proof_objects) or bool(proof_apex)
+    has_rest = result.rest_api and result.rest_api.api_enabled and any(c.success and c.proof for c in result.rest_api.checks)
+    has_any = any(o.proof for o in proof_objects) or bool(proof_apex) or has_rest
 
     if not has_any:
         return
@@ -255,6 +291,16 @@ def print_proofs(result: ScanResult, validated_only: bool = False) -> None:
         console.print(Text(apex.proof, style="green"), soft_wrap=True)
         console.print()
 
+    # REST API proofs
+    if result.rest_api and result.rest_api.api_enabled:
+        rest_proofs = [c for c in result.rest_api.checks if c.success and c.proof]
+        if rest_proofs:
+            console.print(Rule(Text("REST API", style="bold"), style="dim"))
+            for check in rest_proofs:
+                console.print(Text(f"# {check.name}", style="dim"))
+                console.print(Text(check.proof, style="green"), soft_wrap=True)
+                console.print()
+
     # GraphQL proofs
     gql_proofs = [r for r in result.graphql_results if r.proof_count]
     if gql_proofs:
@@ -276,6 +322,9 @@ def render(result: ScanResult, validated_only: bool = False) -> None:
     console.print()
     print_discovery(result)
     console.print()
+    if result.rest_api:
+        print_rest_api(result.rest_api)
+        console.print()
     print_objects(result.objects, validated_only=validated_only)
     console.print()
     if result.apex_results:

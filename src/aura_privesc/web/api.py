@@ -99,6 +99,7 @@ async def create_scan(body: ScanCreate) -> ScanDetail:
         proxy=body.proxy,
         insecure=body.insecure,
         verbose=body.verbose,
+        crm_domain=body.crm_domain,
     )
 
     config_dict = {
@@ -116,6 +117,8 @@ async def create_scan(body: ScanCreate) -> ScanDetail:
         "verbose": config.verbose,
     }
     # Don't store credentials in config_json
+    if config.crm_domain:
+        config_dict["crm_domain"] = config.crm_domain
     if config.proxy:
         config_dict["proxy"] = config.proxy
     if config.objects_list:

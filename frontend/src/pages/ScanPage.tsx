@@ -6,6 +6,7 @@ import ExecutiveSummary from '../components/results/ExecutiveSummary'
 import ObjectsTable from '../components/results/ObjectsTable'
 import ApexTable from '../components/results/ApexTable'
 import GraphQLTable from '../components/results/GraphQLTable'
+import RestApiTable from '../components/results/RestApiTable'
 import Badge from '../components/shared/Badge'
 import { RotateCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -92,6 +93,9 @@ export default function ScanPage() {
       {isComplete && scanDetail?.result && scanDetail.summary && (
         <>
           <ExecutiveSummary stats={scanDetail.summary} />
+          {scanDetail.result.rest_api && (
+            <RestApiTable result={scanDetail.result.rest_api} />
+          )}
           <ObjectsTable
             objects={scanDetail.result.objects}
             scanResult={scanDetail.result}

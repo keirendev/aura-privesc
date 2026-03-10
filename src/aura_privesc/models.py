@@ -142,6 +142,24 @@ class DiscoveryInfo(BaseModel):
     mode: str = "guest"
 
 
+class RestApiCheck(BaseModel):
+    name: str
+    endpoint: str
+    success: bool = False
+    status_code: int | None = None
+    detail: str | None = None
+    proof: str | None = None
+    error: str | None = None
+
+
+class RestApiResult(BaseModel):
+    api_enabled: bool = False
+    api_version: str | None = None
+    api_base_url: str | None = None
+    checks: list[RestApiCheck] = []
+    soql_example_curl: str | None = None
+
+
 class ScanResult(BaseModel):
     target_url: str
     discovery: DiscoveryInfo | None = None
@@ -151,6 +169,7 @@ class ScanResult(BaseModel):
     apex_results: list[ApexResult] = []
     graphql_available: bool = False
     graphql_results: list[GraphQLResult] = []
+    rest_api: RestApiResult | None = None
 
     aura_url: str | None = None
     aura_token: str | None = None

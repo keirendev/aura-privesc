@@ -52,6 +52,7 @@ class ScanConfig:
     proxy: str | None = None
     insecure: bool = False
     verbose: bool = False
+    crm_domain: str | None = None
 
 
 class _EngineProgress:
@@ -145,6 +146,11 @@ class ScanEngine:
             result.user_info = await get_user_info(client)
             result.soql_capable = await check_soql_capability(client)
             config_objects = await get_config_objects(client)
+
+            # REST API checks (guest and authenticated)
+            from .rest_api import check_rest_api_access
+            result.rest_api = await check_rest_api_access(client, crm_domain=cfg.crm_domain)
+
             await self.on_progress("user_context", 1, 1, "User context complete")
 
             # Phase 3: Object enumeration

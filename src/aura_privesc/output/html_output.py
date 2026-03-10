@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from ..models import ApexMethodStatus, GraphQLResult, ObjectResult, RiskLevel, ScanResult
+from ..models import ApexMethodStatus, GraphQLResult, ObjectResult, RestApiResult, RiskLevel, ScanResult
 
 _CSS = """\
 :root{--bg:#1a1a2e;--card:#16213e;--border:#0f3460;--text:#e0e0e0;--muted:#888;
@@ -414,6 +414,67 @@ def _build_apex_table(callable_apex: list) -> str:
 """
 
 
+def _build_rest_api_section(rest_api: RestApiResult | None) -> str:
+    if not rest_api:
+        return ""
+
+    status_label = (
+        '<span class="check">ENABLED</span>' if rest_api.api_enabled
+        else '<span class="fail">DISABLED</span>'
+    )
+
+    rows = ""
+    for i, check in enumerate(rest_api.checks):
+        icon = _check_or_cross(check.success)
+        detail = _esc(check.detail or check.error or "")
+        endpoint_short = _esc(check.endpoint)
+        proof_btn = ""
+        if check.proof:
+            data_id = f"rest-proof-{i}"
+            proof_btn = (
+                f'<textarea id="{data_id}" style="display:none">{_esc(check.proof)}</textarea>'
+                f'<button class="btn btn-info" '
+                f"""onclick="var t=document.getElementById('{data_id}');navigator.clipboard.writeText(t.value)"""
+                f""".then(function(){{showToast('Copied curl')}})">Copy curl</button>"""
+            )
+        rows += f"""<tr>
+  <td>{_esc(check.name)}</td>
+  <td>{icon}</td>
+  <td style="font-size:.85rem;color:var(--muted)">{endpoint_short}</td>
+  <td>{detail}</td>
+  <td>{proof_btn}</td>
+</tr>"""
+
+    soql_block = ""
+    if rest_api.soql_example_curl:
+        escaped = _esc(rest_api.soql_example_curl)
+        soql_block = f"""
+<h3 style="color:var(--cyan);margin:1rem 0 .5rem">SOQL Query (REST API)</h3>
+<pre style="background:var(--bg);color:var(--green);padding:1rem;border-radius:6px;overflow-x:auto;font-size:.85rem;white-space:pre-wrap;word-break:break-all">{escaped}</pre>
+"""
+
+    return f"""
+<h2>REST API (API Enabled) &mdash; {status_label}</h2>
+<div class="card">
+<table>
+<thead>
+<tr>
+  <th>Check</th>
+  <th>Status</th>
+  <th>Endpoint</th>
+  <th>Detail</th>
+  <th></th>
+</tr>
+</thead>
+<tbody>
+{rows}
+</tbody>
+</table>
+{soql_block}
+</div>
+"""
+
+
 def _build_graphql_table(graphql_results: list[GraphQLResult], graphql_available: bool) -> str:
     if not graphql_available or not graphql_results:
         return ""
@@ -520,6 +581,7 @@ def write_report(
     body = "".join([
         _build_header(result, timestamp),
         _build_summary(result, accessible_objects, callable_apex, result.graphql_results),
+        _build_rest_api_section(result.rest_api),
         _build_objects_table(accessible_objects),
         _build_apex_table(callable_apex),
         _build_graphql_table(result.graphql_results, result.graphql_available),

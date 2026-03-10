@@ -60,6 +60,7 @@ def main():
 @click.option("--delay", default=0, type=int, help="Delay between requests in ms")
 @click.option("--concurrency", default=5, type=int, help="Max concurrent requests")
 @click.option("--proxy", default=None, help="HTTP proxy URL")
+@click.option("--crm-domain", default=None, help="CRM domain for REST API checks (e.g. acme.my.salesforce.com)")
 @click.option("--insecure", is_flag=True, help="Disable TLS verification")
 @click.option("-v", "--verbose", is_flag=True, help="Show raw request/response data")
 @click.option("--report/--no-report", default=True, help="Generate HTML report (default: on)")
@@ -82,6 +83,7 @@ def scan(
     delay: int,
     concurrency: int,
     proxy: str | None,
+    crm_domain: str | None,
     insecure: bool,
     verbose: bool,
     report: bool,
@@ -121,6 +123,7 @@ def scan(
         delay=delay,
         concurrency=concurrency,
         proxy=proxy,
+        crm_domain=crm_domain,
         insecure=insecure,
         verbose=verbose,
     )

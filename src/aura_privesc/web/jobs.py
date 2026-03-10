@@ -82,6 +82,7 @@ def _build_summary(result_dict: dict) -> dict:
         "callable_apex": len(callable_apex),
         "graphql_counted": len(gql_counted),
         "graphql_available": result_dict.get("graphql_available", False),
+        "rest_api_enabled": bool(result_dict.get("rest_api", {}).get("api_enabled")) if result_dict.get("rest_api") else False,
     }
 
 
@@ -122,12 +123,12 @@ class JobManager:
         async def on_progress(phase: str, current: int, total: int, detail: str) -> None:
             pct = int((current / total * 100) if total > 0 else 0)
             phase_map = {
-                "discovery": 5,
-                "user_context": 10,
-                "enumeration": 50,
-                "crud_test": 65,
-                "apex": 80,
-                "graphql": 95,
+                "discovery": 2,
+                "user_context": 5,
+                "enumeration": 10,
+                "crud_test": 50,
+                "apex": 65,
+                "graphql": 80,
                 "complete": 100,
             }
             # Use weighted progress: phase base + within-phase progress

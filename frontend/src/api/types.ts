@@ -25,6 +25,7 @@ export interface ScanSummaryStats {
   callable_apex: number
   graphql_counted: number
   graphql_available: boolean
+  rest_api_enabled: boolean
 }
 
 export interface ScanDetail {
@@ -53,6 +54,7 @@ export interface ScanResult {
   apex_results: ApexResult[]
   graphql_available: boolean
   graphql_results: GraphQLResult[]
+  rest_api: RestApiResult | null
   aura_url: string | null
   aura_token: string | null
   aura_context: string | null
@@ -139,6 +141,24 @@ export interface GraphQLResult {
   proof_fields: string | null
 }
 
+export interface RestApiCheck {
+  name: string
+  endpoint: string
+  success: boolean
+  status_code: number | null
+  detail: string | null
+  proof: string | null
+  error: string | null
+}
+
+export interface RestApiResult {
+  api_enabled: boolean
+  api_version: string | null
+  api_base_url: string | null
+  checks: RestApiCheck[]
+  soql_example_curl: string | null
+}
+
 export interface PresetConfig {
   id: string
   label: string
@@ -191,4 +211,5 @@ export interface ScanCreateRequest {
   proxy?: string | null
   insecure?: boolean
   verbose?: boolean
+  crm_domain?: string | null
 }
