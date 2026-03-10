@@ -37,9 +37,10 @@ aura-privesc serve --host 0.0.0.0      # Non-localhost (warning: no auth)
 
 The web UI lets you:
 - Configure scans with presets (Quick / Full / Stealth) or advanced options
-- Monitor scan progress in real-time
+- Monitor scan progress in real-time with cancel support
 - Browse results with sortable/filterable tables
 - Copy curl proof commands with one click
+- **SFDX Recon** — authenticate with a session ID via `sf org login access-token`, enumerate objects and @AuraEnabled Apex methods, then feed results directly into scans
 - Discover objects via GraphQL `__schema` introspection
 - Introspect type fields via `__type` queries
 - Test GraphQL write access (create + auto-delete) per object
@@ -65,8 +66,11 @@ aura-privesc scan -u https://target.my.site.com \
 
 ### Privileged recon with Salesforce CLI
 
-Use the `recon` subcommand with a privileged org user to enumerate all objects and Apex controllers, then feed the results into a scan against the community endpoint to find privilege escalation gaps.
+Use recon to enumerate all objects and Apex controllers with a privileged org user, then feed the results into a scan against the community endpoint to find privilege escalation gaps.
 
+**Web UI (recommended):** Navigate to the Recon page in the sidebar. Enter the instance URL, an alias, and your session ID. The tool authenticates via `sf org login access-token`, enumerates objects and @AuraEnabled methods, and lets you feed results directly into a scan with one click.
+
+**CLI:**
 ```bash
 # 1. Authenticate
 sf org login web --instance-url https://your-instance.sandbox.my.salesforce.com -a myalias
