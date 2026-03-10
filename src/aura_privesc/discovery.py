@@ -24,9 +24,17 @@ async def discover_endpoint(client: AuraClient, base_url: str) -> str:
         logger.debug("Probing endpoint: %s", url)
         resp = await client.probe(url)
         if resp is None:
+            logger.debug("  -> No response (connection error or timeout)")
             continue
-        # Valid Aura responses are JSON or contain aura-specific markers
         text = resp.text
+        logger.debug(
+            "  -> HTTP %d, length=%d, looks_like_aura=%s, body=%s",
+            resp.status_code,
+            len(text),
+            _looks_like_aura(text),
+            text[:300] if text else "(empty)",
+        )
+        # Valid Aura responses are JSON or contain aura-specific markers
         if resp.status_code in (200, 401) and (
             _looks_like_aura(text) or resp.status_code == 200
         ):
