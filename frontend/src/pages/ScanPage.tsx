@@ -100,11 +100,13 @@ export default function ScanPage() {
             objects={scanDetail.result.objects}
             scanResult={scanDetail.result}
             scanId={id!}
+            curlOptions={{ proxy: scanDetail.config.proxy as string | undefined, insecure: scanDetail.config.insecure as boolean | undefined }}
           />
           {scanDetail.result.apex_results.length > 0 && (
             <ApexTable
               results={scanDetail.result.apex_results}
               scanResult={scanDetail.result}
+              curlOptions={{ proxy: scanDetail.config.proxy as string | undefined, insecure: scanDetail.config.insecure as boolean | undefined }}
             />
           )}
           {scanDetail.result.graphql_available && scanDetail.result.graphql_results.length > 0 && (

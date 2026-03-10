@@ -4,10 +4,16 @@ import type { ScanResult } from '../api/types'
  * Port of fireAura() from html_output.py — builds a curl command
  * that reproduces an Aura API request.
  */
+export interface CurlOptions {
+  proxy?: string | null
+  insecure?: boolean
+}
+
 export function buildFireAuraCurl(
   scanResult: ScanResult,
   descriptor: string,
   params: Record<string, unknown>,
+  options?: CurlOptions,
 ): string {
   const url = scanResult.aura_url
   const token = scanResult.aura_token || 'undefined'
@@ -33,7 +39,11 @@ export function buildFireAuraCurl(
     '&aura.token=' +
     encodeURIComponent(token)
 
-  let cmd = `curl -X POST '${url}' -H 'Content-Type: application/x-www-form-urlencoded'`
+  let flags = ''
+  if (options?.insecure) flags += ' -k'
+  if (options?.proxy) flags += ` --proxy ${options.proxy}`
+
+  let cmd = `curl${flags} -X POST '${url}' -H 'Content-Type: application/x-www-form-urlencoded'`
   if (scanResult.sid) {
     cmd += ` -H 'Cookie: sid=${scanResult.sid}'`
   }
