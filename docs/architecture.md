@@ -19,6 +19,7 @@
 | `crud.py` | Record-level CRUD operations + automated write testing (`auto_crud_test_objects`) |
 | `graphql.py` | Phase 5: GraphQL enumeration — record counts, field introspection, record fetching with pagination, filtered queries, relationship traversal. Interactive: `__schema`/`__type` introspection, create/delete mutations, write testing |
 | `proof.py` | Generates reproducible curl commands for findings (including GraphQL record/filtered/introspection/mutation proofs) |
+| `rest_api.py` | Phase 2 (cont.): REST API "API Enabled" detection — probes `/services/data/` endpoints on the CRM domain with a clean httpx client (no Aura headers). Checks: API versions, SOQL query, sObject describe, Tooling API, Bulk API, org limits. Auto-derives CRM domain from Experience Cloud URL or uses user-specified `--crm-domain` |
 | `recon.py` | SF CLI recon subcommand: enumerate objects and `@AuraEnabled` Apex methods via Tooling API |
 | `exceptions.py` | `AuraRequestError`, `ClientOutOfSyncError`, `InvalidSessionError`, `DiscoveryError` |
 
@@ -52,7 +53,7 @@ React + Vite + TypeScript + Tailwind CSS dashboard.
 | `src/components/layout/` | `AppShell`, `Sidebar`, `ThemeToggle` |
 | `src/components/scan-form/` | `ScanForm`, `PresetSelector`, `AdvancedOptions` |
 | `src/components/progress/` | `ScanProgress`, `PhaseIndicator` |
-| `src/components/results/` | `ExecutiveSummary`, `ObjectsTable`, `ApexTable`, `GraphQLTable` |
+| `src/components/results/` | `ExecutiveSummary`, `ObjectsTable`, `ApexTable`, `GraphQLTable`, `RestApiTable` |
 | `src/components/history/` | `ScanHistory` |
 | `src/components/shared/` | `Badge`, `CrudIndicator`, `CopyButton`, `SearchInput` |
 | `src/pages/` | `DashboardPage`, `NewScanPage`, `ScanPage`, `ScanHistoryPage` |
@@ -64,8 +65,12 @@ React + Vite + TypeScript + Tailwind CSS dashboard.
 Phase 1: Discovery (discovery.py)
     └─ Probe endpoints, extract fwuid/context/app from community HTML
 
-Phase 2: User Context (permissions.py)
-    └─ Identify user, check SOQL, discover config objects
+Phase 2: User Context (permissions.py + rest_api.py)
+    ├─ Identify user, check SOQL, discover config objects
+    └─ REST API "API Enabled" check (clean httpx client → CRM domain)
+        ├─ Auto-derive CRM domain: *.my.site.com → *.my.salesforce.com
+        ├─ Or use --crm-domain override
+        └─ 6 checks: versions, SOQL, sObjects, Tooling, Bulk, limits
 
 Phase 3: Object Enumeration (enumerator.py + validator.py)
     ├─ getObjectInfo → CRUD permissions

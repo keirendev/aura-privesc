@@ -10,6 +10,9 @@ export default function ExecutiveSummary({ stats }: { stats: ScanSummaryStats })
     ...(stats.graphql_available
       ? [{ label: 'GraphQL Counted', value: stats.graphql_counted, color: 'var(--purple)' }]
       : []),
+    ...(stats.rest_api_enabled
+      ? [{ label: 'API Enabled', value: 'Yes' as unknown as number, color: 'var(--green)' }]
+      : []),
   ]
 
   return (

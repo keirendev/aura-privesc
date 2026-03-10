@@ -11,7 +11,7 @@ export default function AdvancedOptions({
   values: FormData
   onChange: (vals: FormData) => void
 }) {
-  const hasValues = !!(values.sid || values.token || values.objects_list || values.apex_list || values.proxy || values.insecure)
+  const hasValues = !!(values.sid || values.token || values.objects_list || values.apex_list || values.proxy || values.insecure || values.crm_domain)
   const [open, setOpen] = useState(hasValues)
   const [objectsFileName, setObjectsFileName] = useState<string | null>(null)
   const [apexFileName, setApexFileName] = useState<string | null>(null)
@@ -259,16 +259,27 @@ export default function AdvancedOptions({
                   placeholder="http://127.0.0.1:8080"
                 />
               </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer self-end pb-1">
+              <label className="text-xs" style={{ color: 'var(--muted)' }}>
+                CRM Domain
                 <input
-                  type="checkbox"
-                  checked={!!values.insecure}
-                  onChange={() => toggle('insecure')}
-                  className="accent-[var(--cyan)]"
+                  type="text"
+                  value={values.crm_domain || ''}
+                  onChange={(e) => setField('crm_domain', e.target.value || null)}
+                  className="w-full mt-1 px-2 py-1.5 rounded text-sm"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                  placeholder="acme.my.salesforce.com"
                 />
-                Disable TLS verification
               </label>
             </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!values.insecure}
+                onChange={() => toggle('insecure')}
+                className="accent-[var(--cyan)]"
+              />
+              Disable TLS verification
+            </label>
           </div>
         </div>
       )}

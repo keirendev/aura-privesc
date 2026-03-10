@@ -28,6 +28,7 @@ class ScanCreate(BaseModel):
     proxy: str | None = None
     insecure: bool = False
     verbose: bool = False
+    crm_domain: str | None = None
 
     @field_validator("url")
     @classmethod
