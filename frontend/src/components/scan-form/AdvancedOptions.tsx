@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ChevronDown, ChevronRight, Upload, X } from 'lucide-react'
 import type { ScanCreateRequest } from '../../api/types'
 
 type FormData = Omit<ScanCreateRequest, 'url'>
@@ -13,6 +13,10 @@ export default function AdvancedOptions({
 }) {
   const hasValues = !!(values.sid || values.token || values.objects_list || values.apex_list || values.proxy || values.insecure)
   const [open, setOpen] = useState(hasValues)
+  const [objectsFileName, setObjectsFileName] = useState<string | null>(null)
+  const [apexFileName, setApexFileName] = useState<string | null>(null)
+  const objectsInputRef = useRef<HTMLInputElement>(null)
+  const apexInputRef = useRef<HTMLInputElement>(null)
 
   const toggle = (key: keyof FormData) => {
     onChange({ ...values, [key]: !values[key] })
@@ -22,13 +26,30 @@ export default function AdvancedOptions({
     onChange({ ...values, [key]: val })
   }
 
-  const parseLines = (text: string): string[] | null => {
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
-    return lines.length > 0 ? lines : null
+  const handleFileUpload = (
+    key: 'objects_list' | 'apex_list',
+    setFileName: (name: string | null) => void,
+  ) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setFileName(file.name)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = reader.result as string
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+      setField(key, lines.length > 0 ? lines : null)
+    }
+    reader.readAsText(file)
   }
 
-  const linesToText = (lines: string[] | null | undefined): string => {
-    return lines?.join('\n') || ''
+  const clearFile = (
+    key: 'objects_list' | 'apex_list',
+    setFileName: (name: string | null) => void,
+    inputRef: React.RefObject<HTMLInputElement | null>,
+  ) => {
+    setField(key, null)
+    setFileName(null)
+    if (inputRef.current) inputRef.current.value = ''
   }
 
   return (
@@ -79,37 +100,79 @@ export default function AdvancedOptions({
             </div>
           </div>
 
-          {/* Recon Input — custom objects and apex methods */}
+          {/* Recon Input — custom objects and apex files */}
           <div className="space-y-2">
             <h4 className="text-sm font-medium" style={{ color: 'var(--cyan)' }}>
-              Custom Object &amp; Apex Lists
+              Recon Files
             </h4>
             <p className="text-xs" style={{ color: 'var(--muted)' }}>
-              Paste output from <code>aura-privesc recon</code> or add your own. One per line, # comments ignored.
+              Upload files from <code>aura-privesc recon</code> — one entry per line, # comments ignored.
             </p>
             <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs" style={{ color: 'var(--muted)' }}>
-                Object API names
-                <textarea
-                  value={linesToText(values.objects_list)}
-                  onChange={(e) => setField('objects_list', parseLines(e.target.value))}
-                  rows={4}
-                  className="w-full mt-1 px-2 py-1.5 rounded text-xs font-mono"
-                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', resize: 'vertical' }}
-                  placeholder={"Account\nContact\nCustomObject__c"}
-                />
-              </label>
-              <label className="text-xs" style={{ color: 'var(--muted)' }}>
-                Apex controller.method pairs
-                <textarea
-                  value={linesToText(values.apex_list)}
-                  onChange={(e) => setField('apex_list', parseLines(e.target.value))}
-                  rows={4}
-                  className="w-full mt-1 px-2 py-1.5 rounded text-xs font-mono"
-                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', resize: 'vertical' }}
-                  placeholder={"MyController.getRecords\nAdminCtrl.doAction"}
-                />
-              </label>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>
+                Objects file
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    ref={objectsInputRef}
+                    type="file"
+                    accept=".txt,.csv,.list"
+                    onChange={handleFileUpload('objects_list', setObjectsFileName)}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => objectsInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs cursor-pointer"
+                    style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                  >
+                    <Upload size={12} />
+                    {objectsFileName || (values.objects_list ? `${values.objects_list.length} objects loaded` : 'Choose file')}
+                  </button>
+                  {(objectsFileName || values.objects_list) && (
+                    <button
+                      type="button"
+                      onClick={() => clearFile('objects_list', setObjectsFileName, objectsInputRef)}
+                      className="cursor-pointer"
+                      style={{ color: 'var(--muted)' }}
+                      title="Clear"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>
+                Apex methods file
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    ref={apexInputRef}
+                    type="file"
+                    accept=".txt,.csv,.list"
+                    onChange={handleFileUpload('apex_list', setApexFileName)}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => apexInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs cursor-pointer"
+                    style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                  >
+                    <Upload size={12} />
+                    {apexFileName || (values.apex_list ? `${values.apex_list.length} methods loaded` : 'Choose file')}
+                  </button>
+                  {(apexFileName || values.apex_list) && (
+                    <button
+                      type="button"
+                      onClick={() => clearFile('apex_list', setApexFileName, apexInputRef)}
+                      className="cursor-pointer"
+                      style={{ color: 'var(--muted)' }}
+                      title="Clear"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
