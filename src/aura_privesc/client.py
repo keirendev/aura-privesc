@@ -285,7 +285,8 @@ class AuraClient:
             })
             resp = await self._http.post(url, content=body)
             return resp
-        except httpx.HTTPError:
+        except httpx.HTTPError as e:
+            logger.debug("Probe %s failed: %s: %s", url, type(e).__name__, e)
             return None
 
     async def get_page(self, url: str) -> str | None:
@@ -293,7 +294,8 @@ class AuraClient:
         try:
             resp = await self._http.get(url)
             return resp.text if resp.status_code == 200 else None
-        except httpx.HTTPError:
+        except httpx.HTTPError as e:
+            logger.debug("get_page %s failed: %s: %s", url, type(e).__name__, e)
             return None
 
     async def close(self):
