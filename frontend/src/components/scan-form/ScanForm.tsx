@@ -21,7 +21,8 @@ export default function ScanForm({ initialUrl, initialOptions }: ScanFormProps =
 
   const handlePreset = (preset: PresetConfig) => {
     setSelectedPreset(preset.id)
-    setOptions({ ...options, ...preset.config })
+    const { token, sid, manual_context, manual_endpoint, proxy, insecure, crm_domain } = options
+    setOptions({ token, sid, manual_context, manual_endpoint, proxy, insecure, crm_domain, ...preset.config })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
