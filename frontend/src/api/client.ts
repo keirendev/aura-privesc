@@ -50,6 +50,13 @@ export async function deleteScan(id: string): Promise<void> {
   await fetchJson(`/scans/${id}`, { method: 'DELETE' })
 }
 
+export async function getObjectRecords(
+  scanId: string,
+  objectName: string,
+): Promise<{ object_name: string; record_count: number | null; records: Record<string, unknown>[] }> {
+  return fetchJson(`/scans/${scanId}/records/${objectName}`)
+}
+
 export async function graphqlRecords(body: {
   scan_id: string
   object_name: string

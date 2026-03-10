@@ -61,6 +61,11 @@ def _build_summary(result_dict: dict) -> dict:
     proven = [
         o for o in accessible
         if o.get("crud_validation") and not o["crud_validation"].get("skipped")
+        and any(
+            o["crud_validation"].get(op, {}).get("success")
+            for op in ("create", "update", "delete")
+            if o["crud_validation"].get(op)
+        )
     ]
 
     apex = result_dict.get("apex_results", [])

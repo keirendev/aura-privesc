@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { GraphQLResult, ScanResult } from '../../api/types'
 import SearchInput from '../shared/SearchInput'
+import CopyButton from '../shared/CopyButton'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { buildFireAuraCurl } from '../../lib/curl'
 
@@ -131,27 +132,74 @@ function GraphQLRow({
           </button>
         </td>
       </tr>
-      {expanded && result.fields.length > 0 && (
+      {expanded && (
         <tr style={{ background: 'var(--bg)' }}>
           <td colSpan={5} className="p-4">
-            <table className="w-full text-xs">
-              <thead>
-                <tr style={{ background: 'var(--border)' }}>
-                  <th className="text-left px-2 py-1" style={{ color: 'var(--cyan)' }}>Field</th>
-                  <th className="text-left px-2 py-1" style={{ color: 'var(--cyan)' }}>Type</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...result.fields]
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map((f) => (
-                    <tr key={f.name} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td className="px-2 py-1">{f.name}</td>
-                      <td className="px-2 py-1" style={{ color: 'var(--muted)' }}>{f.data_type}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+            {/* Fields table */}
+            {result.fields.length > 0 ? (
+              <table className="w-full text-xs mb-3">
+                <thead>
+                  <tr style={{ background: 'var(--border)' }}>
+                    <th className="text-left px-2 py-1" style={{ color: 'var(--cyan)' }}>Field</th>
+                    <th className="text-left px-2 py-1" style={{ color: 'var(--cyan)' }}>Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...result.fields]
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((f) => (
+                      <tr key={f.name} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td className="px-2 py-1">{f.name}</td>
+                        <td className="px-2 py-1" style={{ color: 'var(--muted)' }}>{f.data_type}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+                No field data available.
+              </p>
+            )}
+
+            {/* Proof curls */}
+            {result.proof_count && (
+              <div className="mb-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs" style={{ color: 'var(--muted)' }}>Count query curl</span>
+                  <CopyButton text={result.proof_count} />
+                </div>
+                <pre
+                  className="text-xs p-2 rounded"
+                  style={{
+                    background: 'var(--card)',
+                    color: 'var(--green)',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {result.proof_count}
+                </pre>
+              </div>
+            )}
+            {result.proof_fields && (
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs" style={{ color: 'var(--muted)' }}>Fields query curl</span>
+                  <CopyButton text={result.proof_fields} />
+                </div>
+                <pre
+                  className="text-xs p-2 rounded"
+                  style={{
+                    background: 'var(--card)',
+                    color: 'var(--green)',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {result.proof_fields}
+                </pre>
+              </div>
+            )}
           </td>
         </tr>
       )}

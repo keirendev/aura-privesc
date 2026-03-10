@@ -95,6 +95,7 @@ export default function ScanPage() {
           <ObjectsTable
             objects={scanDetail.result.objects}
             scanResult={scanDetail.result}
+            scanId={id!}
           />
           {scanDetail.result.apex_results.length > 0 && (
             <ApexTable
