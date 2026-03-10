@@ -53,12 +53,18 @@ def _build_count_query(object_names: list[str]) -> str:
 
 
 def _build_fields_query(object_names: list[str]) -> str:
-    """Build an objectInfos introspection query for field names/types."""
-    names_str = ",".join(f'"{name}"' for name in object_names)
-    return (
-        f"query getFields{{uiapi{{objectInfos(apiNames:[{names_str}])"
-        f"{{apiName fields{{apiName dataType}}}}}}}}"
+    """Build an objectInfos introspection query for field names/types.
+
+    ``ObjectInfo`` has no ``apiName`` selection field and doesn't support
+    object-name sub-selections.  We use GraphQL **aliases** so each object
+    gets its own ``objectInfos`` call within a single request, and the alias
+    key tells us which result belongs to which object.
+    """
+    aliases = " ".join(
+        f'{name}:objectInfos(apiNames:["{name}"]){{fields{{dataType}}}}'
+        for name in object_names
     )
+    return f"query getFields{{uiapi{{{aliases}}}}}"
 
 
 async def probe_graphql(client: AuraClient) -> bool:
@@ -176,9 +182,9 @@ async def _get_single_count(client: AuraClient, object_name: str) -> int | None:
 async def get_graphql_fields(
     client: AuraClient,
     object_names: list[str],
-    batch_size: int = 100,
+    batch_size: int = 25,
 ) -> dict[str, list[GraphQLFieldInfo]]:
-    """Introspect field names/types via objectInfos. 100 objects per batch (API limit)."""
+    """Introspect field names/types via objectInfos using aliased queries."""
     descriptor = DESCRIPTORS["executeGraphQL"]
     results: dict[str, list[GraphQLFieldInfo]] = {}
 
@@ -202,40 +208,34 @@ async def get_graphql_fields(
             continue
 
         rv = actions[0].get("returnValue", {})
-        obj_infos = rv.get("data", {}).get("uiapi", {}).get("objectInfos", [])
+        uiapi = rv.get("data", {}).get("uiapi", {})
 
-        # Map results back
+        # With aliased queries, each key in uiapi is an object name whose
+        # value is the objectInfos result (list or single ObjectInfo).
+        # Fall back to the legacy objectInfos key if present.
         found_names: set[str] = set()
-        if isinstance(obj_infos, list):
-            for info in obj_infos:
-                api_name = info.get("apiName") or info.get("ApiName", "")
-                fields_data = info.get("fields", [])
-                field_list = []
-                if isinstance(fields_data, list):
-                    for f in fields_data:
-                        fname = f.get("apiName") or f.get("ApiName", "")
-                        dtype = f.get("dataType") or f.get("DataType", "")
-                        if fname:
-                            field_list.append(GraphQLFieldInfo(name=fname, data_type=dtype))
-                results[api_name] = field_list
-                found_names.add(api_name)
-        elif isinstance(obj_infos, dict):
-            # Some responses return a dict keyed by object name
-            for api_name, info in obj_infos.items():
-                fields_data = info.get("fields", {}) if isinstance(info, dict) else {}
-                field_list = []
-                if isinstance(fields_data, dict):
-                    for fname, finfo in fields_data.items():
-                        dtype = finfo.get("dataType", "") if isinstance(finfo, dict) else ""
+        for api_name in batch:
+            info_raw = uiapi.get(api_name)
+            if info_raw is None:
+                continue
+            # Alias value may be a list (take first) or a single object
+            info = info_raw[0] if isinstance(info_raw, list) and info_raw else info_raw
+            if not isinstance(info, dict):
+                continue
+            fields_data = info.get("fields", {})
+            field_list: list[GraphQLFieldInfo] = []
+            if isinstance(fields_data, dict):
+                for fname, finfo in fields_data.items():
+                    dtype = finfo.get("dataType", "") if isinstance(finfo, dict) else ""
+                    field_list.append(GraphQLFieldInfo(name=fname, data_type=dtype))
+            elif isinstance(fields_data, list):
+                for f in fields_data:
+                    fname = f.get("apiName") or f.get("ApiName", "")
+                    dtype = f.get("dataType") or f.get("DataType", "")
+                    if fname:
                         field_list.append(GraphQLFieldInfo(name=fname, data_type=dtype))
-                elif isinstance(fields_data, list):
-                    for f in fields_data:
-                        fname = f.get("apiName") or f.get("ApiName", "")
-                        dtype = f.get("dataType") or f.get("DataType", "")
-                        if fname:
-                            field_list.append(GraphQLFieldInfo(name=fname, data_type=dtype))
-                results[api_name] = field_list
-                found_names.add(api_name)
+            results[api_name] = field_list
+            found_names.add(api_name)
 
         # Mark missing objects
         for name in batch:

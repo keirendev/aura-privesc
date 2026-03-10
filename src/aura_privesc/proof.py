@@ -127,11 +127,11 @@ def _build_count_query(object_names: list[str]) -> str:
 
 
 def _build_fields_query(object_names: list[str]) -> str:
-    names_str = ",".join(f'"{name}"' for name in object_names)
-    return (
-        f"query getFields{{uiapi{{objectInfos(apiNames:[{names_str}])"
-        f"{{apiName fields{{apiName dataType}}}}}}}}"
+    aliases = " ".join(
+        f'{name}:objectInfos(apiNames:["{name}"]){{fields{{dataType}}}}'
+        for name in object_names
     )
+    return f"query getFields{{uiapi{{{aliases}}}}}"
 
 
 def _graphql_params(query: str) -> dict:

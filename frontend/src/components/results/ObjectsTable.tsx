@@ -1,17 +1,34 @@
 import { useState, useMemo } from 'react'
 import type { ObjectResult, ScanResult } from '../../api/types'
+import { getObjectRecords } from '../../api/client'
 import { CrudCell, ReadableIcon } from '../shared/CrudIndicator'
 import SearchInput from '../shared/SearchInput'
 import CopyButton from '../shared/CopyButton'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { buildFireAuraCurl } from '../../lib/curl'
+
+const DESCRIPTORS = {
+  getObjectInfo: 'aura://RecordUiController/ACTION$getObjectInfo',
+  getItems:
+    'serviceComponent://ui.force.components.controllers.lists.selectableListDataProvider.SelectableListDataProviderController/ACTION$getItems',
+  createRecord:
+    'serviceComponent://ui.force.components.controllers.recordGlobalValueProvider.RecordGvpController/ACTION$createRecord',
+  updateRecord:
+    'serviceComponent://ui.force.components.controllers.recordGlobalValueProvider.RecordGvpController/ACTION$updateRecord',
+  deleteRecord:
+    'serviceComponent://ui.force.components.controllers.recordGlobalValueProvider.RecordGvpController/ACTION$deleteRecord',
+} as const
+
+type CurlTab = 'info' | 'items' | 'create' | 'update' | 'delete'
 
 export default function ObjectsTable({
   objects,
   scanResult,
+  scanId,
 }: {
   objects: ObjectResult[]
   scanResult: ScanResult
+  scanId: string
 }) {
   const [search, setSearch] = useState('')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -73,7 +90,7 @@ export default function ObjectsTable({
         className="rounded-lg overflow-hidden"
         style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
       >
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
           <thead>
             <tr style={{ background: 'var(--border)' }}>
               <th className="w-8 px-3 py-2"></th>
@@ -84,13 +101,13 @@ export default function ObjectsTable({
               >
                 Object {sortKey === 'name' ? (sortAsc ? '\u25B2' : '\u25BC') : ''}
               </th>
-              <th className="text-center px-2 py-2" style={{ color: 'var(--cyan)' }}>R</th>
-              <th className="text-center px-2 py-2" style={{ color: 'var(--cyan)' }}>C</th>
-              <th className="text-center px-2 py-2" style={{ color: 'var(--cyan)' }}>U</th>
-              <th className="text-center px-2 py-2" style={{ color: 'var(--cyan)' }}>D</th>
+              <th className="text-center px-2 py-2" style={{ color: 'var(--cyan)', width: '40px' }}>R</th>
+              <th className="text-center px-2 py-2" style={{ color: 'var(--cyan)', width: '40px' }}>C</th>
+              <th className="text-center px-2 py-2" style={{ color: 'var(--cyan)', width: '40px' }}>U</th>
+              <th className="text-center px-2 py-2" style={{ color: 'var(--cyan)', width: '40px' }}>D</th>
               <th
                 className="text-right px-3 py-2 cursor-pointer select-none"
-                style={{ color: 'var(--cyan)' }}
+                style={{ color: 'var(--cyan)', width: '100px' }}
                 onClick={() => toggleSort('record_count')}
               >
                 Records {sortKey === 'record_count' ? (sortAsc ? '\u25B2' : '\u25BC') : ''}
@@ -107,6 +124,7 @@ export default function ObjectsTable({
                   expanded={expanded}
                   onToggle={() => toggleExpand(obj.name)}
                   scanResult={scanResult}
+                  scanId={scanId}
                 />
               )
             })}
@@ -117,18 +135,135 @@ export default function ObjectsTable({
   )
 }
 
+function RecordsTable({ records }: { records: Record<string, unknown>[] }) {
+  const fields = useMemo(() => {
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const rec of records) {
+      for (const key of Object.keys(rec)) {
+        if (!seen.has(key)) {
+          seen.add(key)
+          result.push(key)
+        }
+      }
+    }
+    return result
+  }, [records])
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr style={{ background: 'var(--border)' }}>
+            {fields.map((f) => (
+              <th key={f} className="text-left px-2 py-1 whitespace-nowrap" style={{ color: 'var(--cyan)' }}>
+                {f}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {records.map((rec, i) => (
+            <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+              {fields.map((f) => (
+                <td
+                  key={f}
+                  className="px-2 py-1 max-w-[200px] truncate"
+                  title={String(rec[f] ?? '')}
+                >
+                  {String(rec[f] ?? '')}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function ExpandableObjectRow({
   obj,
   expanded,
   onToggle,
   scanResult,
+  scanId,
 }: {
   obj: ObjectResult
   expanded: boolean
   onToggle: () => void
   scanResult: ScanResult
+  scanId: string
 }) {
+  const [activeCurl, setActiveCurl] = useState<CurlTab>('info')
+  const [records, setRecords] = useState<Record<string, unknown>[] | null>(null)
+  const [recordsLoading, setRecordsLoading] = useState(false)
+  const [recordsError, setRecordsError] = useState<string | null>(null)
   const count = obj.record_count != null ? obj.record_count.toString() : '-'
+
+  const curls: Record<CurlTab, string> = {
+    info: obj.proof || buildFireAuraCurl(scanResult, DESCRIPTORS.getObjectInfo, {
+      objectApiName: obj.name,
+    }),
+    items: obj.proof_records || buildFireAuraCurl(scanResult, DESCRIPTORS.getItems, {
+      entityNameOrId: obj.name,
+      layoutType: 'FULL',
+      pageSize: 100,
+      currentPage: 0,
+      useTimeout: false,
+      getCount: false,
+      enableRowActions: false,
+    }),
+    create: buildFireAuraCurl(scanResult, DESCRIPTORS.createRecord, {
+      record: {
+        apiName: obj.name,
+        fields: { Name: 'TestRecord' },
+      },
+    }),
+    update: buildFireAuraCurl(scanResult, DESCRIPTORS.updateRecord, {
+      record: {
+        apiName: obj.name,
+        id: '<RECORD_ID>',
+        fields: { Name: 'UpdatedValue' },
+      },
+    }),
+    delete: buildFireAuraCurl(scanResult, DESCRIPTORS.deleteRecord, {
+      recordId: '<RECORD_ID>',
+    }),
+  }
+
+  const handleActionClick = async (tab: CurlTab, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setActiveCurl(tab)
+    try {
+      await navigator.clipboard.writeText(curls[tab])
+    } catch {
+      prompt('Copy curl:', curls[tab])
+    }
+  }
+
+  const handleFetchRecords = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (recordsLoading) return
+    setRecordsLoading(true)
+    setRecordsError(null)
+    try {
+      const data = await getObjectRecords(scanId, obj.name)
+      setRecords(data.records)
+    } catch (err) {
+      setRecordsError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRecordsLoading(false)
+    }
+  }
+
+  const buttons: { tab: CurlTab; label: string; color: string; show: boolean }[] = [
+    { tab: 'info', label: 'getObjectInfo', color: 'var(--cyan)', show: true },
+    { tab: 'items', label: 'getItems', color: '#1565c0', show: true },
+    { tab: 'create', label: 'createRecord', color: '#2e7d32', show: obj.crud.createable },
+    { tab: 'update', label: 'updateRecord', color: '#e65100', show: obj.crud.updateable },
+    { tab: 'delete', label: 'deleteRecord', color: '#b71c1c', show: obj.crud.deletable },
+  ]
 
   return (
     <>
@@ -152,130 +287,75 @@ function ExpandableObjectRow({
           <td colSpan={7} className="p-4">
             {/* Action buttons */}
             <div className="flex gap-2 mb-3 flex-wrap">
-              <ActionButton
-                label="getObjectInfo"
-                color="var(--cyan)"
-                curl={buildFireAuraCurl(scanResult, 'aura://RecordUiController/ACTION$getObjectInfo', {
-                  objectApiName: obj.name,
-                })}
-              />
-              <ActionButton
-                label="getItems"
-                color="#1565c0"
-                curl={buildFireAuraCurl(
-                  scanResult,
-                  'serviceComponent://ui.force.components.controllers.lists.selectableListDataProvider.SelectableListDataProviderController/ACTION$getItems',
-                  {
-                    entityNameOrId: obj.name,
-                    layoutType: 'FULL',
-                    pageSize: 100,
-                    currentPage: 0,
-                    useTimeout: false,
-                    getCount: false,
-                    enableRowActions: false,
-                  },
-                )}
-              />
+              {buttons.filter((b) => b.show).map((b) => (
+                <button
+                  key={b.tab}
+                  onClick={(e) => handleActionClick(b.tab, e)}
+                  className="px-3 py-1 rounded text-xs font-semibold cursor-pointer"
+                  style={{
+                    background: activeCurl === b.tab ? b.color : 'var(--border)',
+                    color: activeCurl === b.tab ? '#fff' : 'var(--text)',
+                  }}
+                >
+                  {b.label}
+                </button>
+              ))}
+              <span className="mx-1" style={{ borderLeft: '1px solid var(--border)' }} />
+              <button
+                onClick={handleFetchRecords}
+                disabled={recordsLoading}
+                className="px-3 py-1 rounded text-xs font-semibold cursor-pointer inline-flex items-center gap-1"
+                style={{
+                  background: records ? 'var(--purple)' : 'var(--border)',
+                  color: records ? '#fff' : 'var(--text)',
+                  opacity: recordsLoading ? 0.6 : 1,
+                }}
+              >
+                {recordsLoading && <Loader2 size={12} className="animate-spin" />}
+                {records ? `Records (${records.length})` : 'Fetch Records'}
+              </button>
             </div>
 
-            {/* Sample records */}
-            {obj.sample_records && obj.sample_records.length > 0 && (
-              <div>
-                <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--muted)' }}>
-                  Sample Records
-                </h4>
-                <div className="overflow-x-auto">
-                  <SampleRecordsTable records={obj.sample_records} />
-                </div>
+            {/* Records display */}
+            {recordsError && (
+              <div className="mb-3 p-2 rounded text-xs" style={{ background: 'var(--card)', color: 'var(--red, #ef4444)' }}>
+                {recordsError}
+              </div>
+            )}
+            {records && records.length > 0 && (
+              <div className="mb-3">
+                <RecordsTable records={records} />
+              </div>
+            )}
+            {records && records.length === 0 && (
+              <div className="mb-3 text-xs" style={{ color: 'var(--muted)' }}>
+                No records returned.
               </div>
             )}
 
-            {/* Proof curl */}
-            {obj.proof && (
-              <div className="mt-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                    Proof curl
-                  </span>
-                  <CopyButton text={obj.proof} />
-                </div>
-                <pre
-                  className="text-xs p-2 rounded overflow-x-auto"
-                  style={{ background: 'var(--card)', color: 'var(--green)' }}
-                >
-                  {obj.proof}
-                </pre>
+            {/* Active curl display */}
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                  {buttons.find((b) => b.tab === activeCurl)?.label} curl
+                </span>
+                <CopyButton text={curls[activeCurl]} />
               </div>
-            )}
+              <pre
+                className="text-xs p-2 rounded"
+                style={{
+                  background: 'var(--card)',
+                  color: 'var(--green)',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}
+              >
+                {curls[activeCurl]}
+              </pre>
+            </div>
           </td>
         </tr>
       )}
     </>
-  )
-}
-
-function ActionButton({ label, color, curl }: { label: string; color: string; curl: string }) {
-  const handleClick = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    try {
-      await navigator.clipboard.writeText(curl)
-    } catch {
-      prompt('Copy curl:', curl)
-    }
-  }
-
-  return (
-    <button
-      onClick={handleClick}
-      className="px-3 py-1 rounded text-xs font-semibold cursor-pointer"
-      style={{ background: color, color: '#fff' }}
-    >
-      {label}
-    </button>
-  )
-}
-
-function SampleRecordsTable({ records }: { records: Record<string, unknown>[] }) {
-  const fields = useMemo(() => {
-    const seen = new Set<string>()
-    const result: string[] = []
-    for (const rec of records) {
-      for (const key of Object.keys(rec)) {
-        if (!seen.has(key)) {
-          seen.add(key)
-          result.push(key)
-        }
-      }
-    }
-    return result
-  }, [records])
-
-  return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr style={{ background: 'var(--border)' }}>
-          {fields.map((f) => (
-            <th key={f} className="text-left px-2 py-1" style={{ color: 'var(--cyan)' }}>
-              {f}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {records.slice(0, 10).map((rec, i) => (
-          <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-            {fields.map((f) => (
-              <td
-                key={f}
-                className="px-2 py-1 max-w-[200px] truncate"
-                title={String(rec[f] ?? '')}
-              >
-                {String(rec[f] ?? '')}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
   )
 }

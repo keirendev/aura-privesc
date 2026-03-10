@@ -291,6 +291,27 @@ async def _get_scan_client(scan_id: str):
     return client
 
 
+@router.get("/scans/{scan_id}/records/{object_name}")
+async def get_object_records(scan_id: str, object_name: str) -> dict:
+    """Live getItems call to fetch records for an object."""
+    import re
+    if not re.match(r'^[A-Za-z][A-Za-z0-9_]*$', object_name):
+        raise HTTPException(400, "Invalid object name")
+
+    from ..enumerator import get_records
+
+    client = await _get_scan_client(scan_id)
+    try:
+        count, records = await get_records(client, object_name)
+        return {
+            "object_name": object_name,
+            "record_count": count,
+            "records": records,
+        }
+    finally:
+        await client.close()
+
+
 @router.post("/graphql/records")
 async def graphql_records(body: GraphQLRecordsRequest) -> dict:
     from ..graphql import get_graphql_records
