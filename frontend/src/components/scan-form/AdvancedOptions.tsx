@@ -24,6 +24,7 @@ export default function AdvancedOptions({
   return (
     <div className="mb-6">
       <button
+        type="button"
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 text-sm font-medium cursor-pointer"
         style={{ color: 'var(--cyan)' }}
