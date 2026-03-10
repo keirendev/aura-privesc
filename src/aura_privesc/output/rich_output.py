@@ -8,7 +8,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
-from ..models import ApexMethodStatus, ObjectResult, RiskLevel, ScanResult
+from ..models import ApexMethodStatus, GraphQLResult, ObjectResult, RiskLevel, ScanResult
 
 console = Console()
 
@@ -155,6 +155,27 @@ def print_apex(results: list, validated_only: bool = False) -> None:
     console.print(table)
 
 
+def print_graphql(graphql_results: list[GraphQLResult], graphql_available: bool) -> None:
+    if not graphql_available:
+        return
+    if not graphql_results:
+        console.print("[dim]GraphQL available but no objects enumerated.[/dim]")
+        return
+
+    table = Table(title=f"GraphQL Enumeration ({len(graphql_results)} objects)")
+    table.add_column("Object", style="bold")
+    table.add_column("Record Count", justify="right")
+    table.add_column("Fields", justify="right")
+
+    graphql_results_sorted = sorted(graphql_results, key=lambda r: r.object_name)
+    for r in graphql_results_sorted:
+        count_str = str(r.total_count) if r.total_count is not None else "-"
+        fields_str = str(len(r.fields)) if r.fields else "-"
+        table.add_row(r.object_name, count_str, fields_str)
+
+    console.print(table)
+
+
 def print_summary(result: ScanResult, validated_only: bool = False) -> None:
     if validated_only:
         accessible = result.validated_objects
@@ -185,6 +206,10 @@ def print_summary(result: ScanResult, validated_only: bool = False) -> None:
 
     if callable_apex:
         lines.append(f"Callable Apex methods: {len(callable_apex)}")
+
+    if result.graphql_available:
+        gql_with_counts = [r for r in result.graphql_results if r.total_count is not None]
+        lines.append(f"GraphQL enumerated: {len(result.graphql_results)} objects, {len(gql_with_counts)} with counts")
 
     console.print(Panel("\n".join(lines), title="[bold]Summary[/bold]", border_style="cyan"))
 
@@ -230,6 +255,20 @@ def print_proofs(result: ScanResult, validated_only: bool = False) -> None:
         console.print(Text(apex.proof, style="green"), soft_wrap=True)
         console.print()
 
+    # GraphQL proofs
+    gql_proofs = [r for r in result.graphql_results if r.proof_count]
+    if gql_proofs:
+        console.print(Rule(Text("GraphQL — executeGraphQL", style="bold"), style="dim"))
+        # Show proof for the first object as a representative example
+        first = gql_proofs[0]
+        console.print(Text("# Record count query", style="dim"))
+        console.print(Text(first.proof_count, style="green"), soft_wrap=True)
+        if first.proof_fields:
+            console.print()
+            console.print(Text("# Field introspection query", style="dim"))
+            console.print(Text(first.proof_fields, style="green"), soft_wrap=True)
+        console.print()
+
 
 def render(result: ScanResult, validated_only: bool = False) -> None:
     """Full rich output rendering."""
@@ -241,6 +280,9 @@ def render(result: ScanResult, validated_only: bool = False) -> None:
     console.print()
     if result.apex_results:
         print_apex(result.apex_results, validated_only=validated_only)
+        console.print()
+    if result.graphql_available:
+        print_graphql(result.graphql_results, result.graphql_available)
         console.print()
     print_summary(result, validated_only=validated_only)
     console.print()

@@ -1,0 +1,147 @@
+import { useParams } from 'react-router-dom'
+import { useJob } from '../hooks/useJob'
+import { useScanResult } from '../hooks/useScanResult'
+import ScanProgress from '../components/progress/ScanProgress'
+import ExecutiveSummary from '../components/results/ExecutiveSummary'
+import ObjectsTable from '../components/results/ObjectsTable'
+import ApexTable from '../components/results/ApexTable'
+import GraphQLTable from '../components/results/GraphQLTable'
+import Badge from '../components/shared/Badge'
+import { useEffect } from 'react'
+
+export default function ScanPage() {
+  const { id } = useParams<{ id: string }>()
+  const { data: status } = useJob(id)
+  const { data: scanDetail, refetch } = useScanResult(id)
+
+  // Refetch full scan when status changes to completed
+  useEffect(() => {
+    if (status?.status === 'completed' || status?.status === 'failed') {
+      refetch()
+    }
+  }, [status?.status, refetch])
+
+  if (!status && !scanDetail) {
+    return <p style={{ color: 'var(--muted)' }}>Loading...</p>
+  }
+
+  const isRunning = status?.status === 'running' || status?.status === 'queued'
+  const isFailed = status?.status === 'failed'
+  const isComplete = status?.status === 'completed'
+
+  return (
+    <div className="max-w-5xl">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--cyan)' }}>
+            Scan Results
+          </h1>
+          {scanDetail && (
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>
+              {scanDetail.url}
+            </p>
+          )}
+        </div>
+        {status && <Badge value={status.status} type="status" />}
+      </div>
+
+      {/* Progress while running */}
+      {isRunning && status && (
+        <div
+          className="p-6 rounded-lg mb-6"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+        >
+          <ScanProgress status={status} />
+        </div>
+      )}
+
+      {/* Error state */}
+      {isFailed && scanDetail?.error && (
+        <div
+          className="p-4 rounded-lg mb-6"
+          style={{ background: 'var(--card)', border: '1px solid var(--red)' }}
+        >
+          <p className="font-semibold" style={{ color: 'var(--red)' }}>
+            Scan Failed
+          </p>
+          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+            {scanDetail.error}
+          </p>
+        </div>
+      )}
+
+      {/* Results when complete */}
+      {isComplete && scanDetail?.result && scanDetail.summary && (
+        <>
+          <ExecutiveSummary stats={scanDetail.summary} />
+          <ObjectsTable
+            objects={scanDetail.result.objects}
+            scanResult={scanDetail.result}
+          />
+          {scanDetail.result.apex_results.length > 0 && (
+            <ApexTable
+              results={scanDetail.result.apex_results}
+              scanResult={scanDetail.result}
+            />
+          )}
+          {scanDetail.result.graphql_available && scanDetail.result.graphql_results.length > 0 && (
+            <GraphQLTable
+              results={scanDetail.result.graphql_results}
+              scanResult={scanDetail.result}
+            />
+          )}
+
+          {/* Discovery info */}
+          {scanDetail.result.discovery && (
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--cyan)' }}>
+                Discovery Info
+              </h3>
+              <div
+                className="p-4 rounded-lg space-y-1 text-sm"
+                style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+              >
+                <div>
+                  <span style={{ color: 'var(--muted)' }}>Endpoint:</span>{' '}
+                  {scanDetail.result.discovery.endpoint}
+                </div>
+                <div>
+                  <span style={{ color: 'var(--muted)' }}>Mode:</span>{' '}
+                  {scanDetail.result.discovery.mode}
+                </div>
+                {scanDetail.result.discovery.fwuid && (
+                  <div>
+                    <span style={{ color: 'var(--muted)' }}>fwuid:</span>{' '}
+                    <span className="text-xs">{scanDetail.result.discovery.fwuid}</span>
+                  </div>
+                )}
+                {scanDetail.result.user_info && (
+                  <>
+                    {scanDetail.result.user_info.display_name && (
+                      <div>
+                        <span style={{ color: 'var(--muted)' }}>User:</span>{' '}
+                        {scanDetail.result.user_info.display_name}
+                      </div>
+                    )}
+                    <div>
+                      <span style={{ color: 'var(--muted)' }}>Guest:</span>{' '}
+                      {scanDetail.result.user_info.is_guest ? 'Yes' : 'No'}
+                    </div>
+                  </>
+                )}
+                <div>
+                  <span style={{ color: 'var(--muted)' }}>SOQL:</span>{' '}
+                  {scanDetail.result.soql_capable ? (
+                    <span style={{ color: 'var(--green)' }}>Available</span>
+                  ) : (
+                    <span style={{ color: 'var(--red)' }}>Not available</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}

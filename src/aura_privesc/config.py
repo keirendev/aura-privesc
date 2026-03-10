@@ -36,6 +36,7 @@ DESCRIPTORS = {
         "serviceComponent://ui.force.components.controllers.recordGlobalValueProvider."
         "RecordGvpController/ACTION$deleteRecord"
     ),
+    "executeGraphQL": "aura://RecordUiController/ACTION$executeGraphQL",
 }
 
 STANDARD_OBJECTS = [
