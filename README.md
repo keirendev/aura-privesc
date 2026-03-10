@@ -40,6 +40,9 @@ The web UI lets you:
 - Monitor scan progress in real-time
 - Browse results with sortable/filterable tables
 - Copy curl proof commands with one click
+- Discover objects via GraphQL `__schema` introspection
+- Introspect type fields via `__type` queries
+- Test GraphQL write access (create + auto-delete) per object
 - View full scan history
 - Toggle dark/light theme
 
@@ -88,6 +91,7 @@ aura-privesc scan -u https://target.my.site.com \
 4. **CRUD write testing** -- automatically tests create/update/delete on writable objects to prove access
 5. **Apex testing** -- discovers `@AuraEnabled` controllers from JS, tests each method
 6. **GraphQL enumeration** -- uses `executeGraphQL` for accurate record counts, field introspection, record fetching with cursor pagination, filtered queries, and relationship traversal
+7. **Interactive GraphQL tools** (web UI only) -- `__schema`/`__type` introspection to discover objects and fields directly through GraphQL, and mutation-based write testing (create + delete) to prove write access via a different attack surface than Aura CRUD
 
 ## HTML report
 

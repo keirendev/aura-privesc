@@ -146,6 +146,31 @@ export interface PresetConfig {
   config: Record<string, unknown>
 }
 
+export interface IntrospectSchemaResponse {
+  objects: string[]
+  proof: string
+}
+
+export interface IntrospectTypeResponse {
+  type_name: string
+  fields: { name: string; data_type: string }[]
+  proof: string
+}
+
+export interface GraphQLMutationResult {
+  operation: string
+  success: boolean
+  record_id: string | null
+  error: string | null
+  proof: string | null
+}
+
+export interface GraphQLWriteTestResult {
+  object_name: string
+  create: GraphQLMutationResult | null
+  delete: GraphQLMutationResult | null
+}
+
 export interface ScanCreateRequest {
   url: string
   token?: string | null

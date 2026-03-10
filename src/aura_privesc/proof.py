@@ -136,9 +136,12 @@ def _build_fields_query(object_names: list[str]) -> str:
 
 def _graphql_params(query: str) -> dict:
     op_name = ""
-    if query.strip().startswith("query "):
-        rest = query.strip()[6:]
-        op_name = rest.split("{", 1)[0].split("(", 1)[0].strip()
+    stripped = query.strip()
+    for prefix in ("query ", "mutation "):
+        if stripped.startswith(prefix):
+            rest = stripped[len(prefix):]
+            op_name = rest.split("{", 1)[0].split("(", 1)[0].strip()
+            break
     return {
         "queryInput": {
             "operationName": op_name,
@@ -240,6 +243,110 @@ def proof_for_graphql_filtered(
 ) -> str:
     """Generate a curl command for a filtered GraphQL query."""
     query = _build_filtered_record_query(object_name, fields, where)
+    return generate_curl(
+        aura_url=client.aura_url,
+        descriptor=DESCRIPTORS["executeGraphQL"],
+        params=_graphql_params(query),
+        token=client.aura_token,
+        context=client._build_context(),
+        sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
+    )
+
+
+# --- Introspection proofs ---
+
+
+def _build_schema_query() -> str:
+    return "{__schema{queryType{fields{name description}}}}"
+
+
+def _build_type_query(type_name: str) -> str:
+    _validate_api_name(type_name)
+    return f'{{__type(name:"{type_name}"){{fields{{name type{{name kind}}}}}}}}'
+
+
+def proof_for_graphql_introspection(client: AuraClient) -> str:
+    """Generate a curl command for __schema introspection."""
+    query = _build_schema_query()
+    return generate_curl(
+        aura_url=client.aura_url,
+        descriptor=DESCRIPTORS["executeGraphQL"],
+        params=_graphql_params(query),
+        token=client.aura_token,
+        context=client._build_context(),
+        sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
+    )
+
+
+def proof_for_graphql_type_introspection(
+    client: AuraClient, type_name: str
+) -> str:
+    """Generate a curl command for __type introspection."""
+    query = _build_type_query(type_name)
+    return generate_curl(
+        aura_url=client.aura_url,
+        descriptor=DESCRIPTORS["executeGraphQL"],
+        params=_graphql_params(query),
+        token=client.aura_token,
+        context=client._build_context(),
+        sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
+    )
+
+
+# --- Mutation proofs ---
+
+
+def _build_create_mutation(object_name: str, fields: dict[str, str]) -> str:
+    _validate_api_name(object_name)
+    field_entries = []
+    for fname, fval in fields.items():
+        _validate_api_name(fname)
+        escaped = str(fval).replace("\\", "\\\\").replace('"', '\\"')
+        field_entries.append(f'{fname}:{{value:"{escaped}"}}')
+    fields_str = ",".join(field_entries)
+    return (
+        f'mutation createRecord{{uiapi{{RecordCreate(input:{{apiName:"{object_name}",'
+        f"fields:{{{fields_str}}}}}){{Id}}}}}}"
+    )
+
+
+def _build_delete_mutation(object_name: str, record_id: str) -> str:
+    _validate_api_name(object_name)
+    escaped_id = record_id.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        f'mutation deleteRecord{{uiapi{{RecordDelete(input:{{apiName:"{object_name}",'
+        f'id:"{escaped_id}"}}){{Id}}}}}}'
+    )
+
+
+def proof_for_graphql_create(
+    client: AuraClient, object_name: str, fields: dict[str, str]
+) -> str:
+    """Generate a curl command for a GraphQL create mutation."""
+    query = _build_create_mutation(object_name, fields)
+    return generate_curl(
+        aura_url=client.aura_url,
+        descriptor=DESCRIPTORS["executeGraphQL"],
+        params=_graphql_params(query),
+        token=client.aura_token,
+        context=client._build_context(),
+        sid=client.sid,
+        proxy=client.proxy,
+        insecure=client.insecure,
+    )
+
+
+def proof_for_graphql_delete(
+    client: AuraClient, object_name: str, record_id: str
+) -> str:
+    """Generate a curl command for a GraphQL delete mutation."""
+    query = _build_delete_mutation(object_name, record_id)
     return generate_curl(
         aura_url=client.aura_url,
         descriptor=DESCRIPTORS["executeGraphQL"],

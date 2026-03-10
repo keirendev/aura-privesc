@@ -7,8 +7,8 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from .config import DESCRIPTORS
-from .models import GraphQLFieldInfo, GraphQLRecordPage, GraphQLResult
-from .proof import proof_for_graphql_count, proof_for_graphql_fields
+from .models import GraphQLFieldInfo, GraphQLMutationResult, GraphQLRecordPage, GraphQLResult, GraphQLWriteTestResult
+from .proof import proof_for_graphql_count, proof_for_graphql_create, proof_for_graphql_delete, proof_for_graphql_fields, proof_for_graphql_introspection, proof_for_graphql_type_introspection
 
 if TYPE_CHECKING:
     from rich.progress import Progress
@@ -29,11 +29,14 @@ def _validate_api_name(name: str) -> None:
 
 def _graphql_params(query: str) -> dict[str, Any]:
     """Build executeGraphQL params for a given GraphQL query string."""
-    # Extract operation name from the query (first word after 'query ')
+    # Extract operation name from the query (first word after 'query ' or 'mutation ')
     op_name = ""
-    if query.strip().startswith("query "):
-        rest = query.strip()[6:]
-        op_name = rest.split("{", 1)[0].split("(", 1)[0].strip()
+    stripped = query.strip()
+    for prefix in ("query ", "mutation "):
+        if stripped.startswith(prefix):
+            rest = stripped[len(prefix):]
+            op_name = rest.split("{", 1)[0].split("(", 1)[0].strip()
+            break
     return {
         "queryInput": {
             "operationName": op_name,
@@ -555,3 +558,226 @@ async def get_graphql_relationships(
         records=records,
         total_count=total_count,
     )
+
+
+# ---------------------------------------------------------------------------
+# __schema / __type introspection
+# ---------------------------------------------------------------------------
+
+
+def _build_schema_query() -> str:
+    """Build a __schema introspection query to discover queryable objects."""
+    return "{__schema{queryType{fields{name description}}}}"
+
+
+def _build_type_query(type_name: str) -> str:
+    """Build a __type introspection query to discover fields of a type."""
+    _validate_api_name(type_name)
+    return f'{{__type(name:"{type_name}"){{fields{{name type{{name kind}}}}}}}}'
+
+
+async def introspect_schema(client: AuraClient) -> list[str]:
+    """Execute __schema introspection and return discovered object names."""
+    descriptor = DESCRIPTORS["executeGraphQL"]
+    query = _build_schema_query()
+    params = _graphql_params(query)
+
+    try:
+        resp = await client.request(descriptor, params)
+    except Exception:
+        logger.debug("GraphQL schema introspection failed", exc_info=True)
+        return []
+
+    actions = resp.get("actions", [])
+    if not actions or actions[0].get("state") != "SUCCESS":
+        return []
+
+    rv = actions[0].get("returnValue", {})
+    if rv.get("errors"):
+        return []
+
+    schema = rv.get("data", {}).get("__schema", {})
+    query_type = schema.get("queryType", {})
+    fields = query_type.get("fields", [])
+
+    return [f["name"] for f in fields if isinstance(f, dict) and "name" in f]
+
+
+async def introspect_type_fields(
+    client: AuraClient, type_name: str
+) -> list[GraphQLFieldInfo]:
+    """Execute __type introspection and return field info for a type."""
+    _validate_api_name(type_name)
+    descriptor = DESCRIPTORS["executeGraphQL"]
+    query = _build_type_query(type_name)
+    params = _graphql_params(query)
+
+    try:
+        resp = await client.request(descriptor, params)
+    except Exception:
+        logger.debug("GraphQL type introspection failed for %s", type_name, exc_info=True)
+        return []
+
+    actions = resp.get("actions", [])
+    if not actions or actions[0].get("state") != "SUCCESS":
+        return []
+
+    rv = actions[0].get("returnValue", {})
+    if rv.get("errors"):
+        return []
+
+    type_data = rv.get("data", {}).get("__type")
+    if not type_data:
+        return []
+
+    result = []
+    for field in type_data.get("fields", []):
+        if not isinstance(field, dict):
+            continue
+        name = field.get("name", "")
+        type_info = field.get("type", {})
+        type_name_str = type_info.get("name", "") if isinstance(type_info, dict) else ""
+        kind = type_info.get("kind", "") if isinstance(type_info, dict) else ""
+        data_type = type_name_str or kind
+        result.append(GraphQLFieldInfo(name=name, data_type=data_type))
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# GraphQL mutations (create / delete)
+# ---------------------------------------------------------------------------
+
+
+def _build_create_mutation(object_name: str, fields: dict[str, str]) -> str:
+    """Build a UIAPI GraphQL create mutation."""
+    _validate_api_name(object_name)
+    field_entries = []
+    for fname, fval in fields.items():
+        _validate_api_name(fname)
+        escaped = str(fval).replace("\\", "\\\\").replace('"', '\\"')
+        field_entries.append(f'{fname}:{{value:"{escaped}"}}')
+    fields_str = ",".join(field_entries)
+    return (
+        f'mutation createRecord{{uiapi{{RecordCreate(input:{{apiName:"{object_name}",'
+        f"fields:{{{fields_str}}}}}){{Id}}}}}}"
+    )
+
+
+def _build_delete_mutation(object_name: str, record_id: str) -> str:
+    """Build a UIAPI GraphQL delete mutation."""
+    _validate_api_name(object_name)
+    escaped_id = record_id.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        f'mutation deleteRecord{{uiapi{{RecordDelete(input:{{apiName:"{object_name}",'
+        f'id:"{escaped_id}"}}){{Id}}}}}}'
+    )
+
+
+async def graphql_create_record(
+    client: AuraClient,
+    object_name: str,
+    fields: dict[str, str],
+) -> GraphQLMutationResult:
+    """Execute a GraphQL create mutation. Returns result with record ID on success."""
+    _validate_api_name(object_name)
+    descriptor = DESCRIPTORS["executeGraphQL"]
+    query = _build_create_mutation(object_name, fields)
+    params = _graphql_params(query)
+    proof = proof_for_graphql_create(client, object_name, fields)
+
+    try:
+        resp = await client.request(descriptor, params)
+    except Exception as e:
+        logger.debug("GraphQL create failed for %s", object_name, exc_info=True)
+        return GraphQLMutationResult(operation="create", error=str(e), proof=proof)
+
+    actions = resp.get("actions", [])
+    if not actions or actions[0].get("state") != "SUCCESS":
+        error_msg = actions[0].get("error", [{}])[0].get("message", "Request failed") if actions else "No response"
+        return GraphQLMutationResult(operation="create", error=str(error_msg), proof=proof)
+
+    rv = actions[0].get("returnValue", {})
+    errors = rv.get("errors")
+    if errors:
+        error_msg = errors[0].get("message", str(errors)) if isinstance(errors[0], dict) else str(errors)
+        return GraphQLMutationResult(operation="create", error=error_msg, proof=proof)
+
+    # Extract record ID from response
+    data = rv.get("data", {}).get("uiapi", {})
+    record_create = data.get("RecordCreate", {})
+    record_id = record_create.get("Id")
+
+    return GraphQLMutationResult(
+        operation="create",
+        success=True,
+        record_id=record_id,
+        proof=proof,
+    )
+
+
+async def graphql_delete_record(
+    client: AuraClient,
+    object_name: str,
+    record_id: str,
+) -> GraphQLMutationResult:
+    """Execute a GraphQL delete mutation."""
+    _validate_api_name(object_name)
+    descriptor = DESCRIPTORS["executeGraphQL"]
+    query = _build_delete_mutation(object_name, record_id)
+    params = _graphql_params(query)
+    proof = proof_for_graphql_delete(client, object_name, record_id)
+
+    try:
+        resp = await client.request(descriptor, params)
+    except Exception as e:
+        logger.debug("GraphQL delete failed for %s", object_name, exc_info=True)
+        return GraphQLMutationResult(operation="delete", error=str(e), proof=proof)
+
+    actions = resp.get("actions", [])
+    if not actions or actions[0].get("state") != "SUCCESS":
+        error_msg = actions[0].get("error", [{}])[0].get("message", "Request failed") if actions else "No response"
+        return GraphQLMutationResult(operation="delete", error=str(error_msg), proof=proof)
+
+    rv = actions[0].get("returnValue", {})
+    errors = rv.get("errors")
+    if errors:
+        error_msg = errors[0].get("message", str(errors)) if isinstance(errors[0], dict) else str(errors)
+        return GraphQLMutationResult(operation="delete", error=error_msg, proof=proof)
+
+    return GraphQLMutationResult(
+        operation="delete",
+        success=True,
+        record_id=record_id,
+        proof=proof,
+    )
+
+
+async def graphql_write_test(
+    client: AuraClient,
+    object_name: str,
+    test_field: str = "Name",
+    test_value: str = "aura-privesc-test",
+) -> GraphQLWriteTestResult:
+    """Create then immediately delete a record to prove write access without leaving artifacts."""
+    _validate_api_name(object_name)
+    _validate_api_name(test_field)
+
+    result = GraphQLWriteTestResult(object_name=object_name)
+
+    # Step 1: Create
+    create_result = await graphql_create_record(
+        client, object_name, {test_field: test_value}
+    )
+    result.create = create_result
+
+    if not create_result.success or not create_result.record_id:
+        return result
+
+    # Step 2: Delete the created record
+    delete_result = await graphql_delete_record(
+        client, object_name, create_result.record_id
+    )
+    result.delete = delete_result
+
+    return result

@@ -1,4 +1,8 @@
 import type {
+  IntrospectSchemaResponse,
+  IntrospectTypeResponse,
+  GraphQLMutationResult,
+  GraphQLWriteTestResult,
   PresetConfig,
   ScanCreateRequest,
   ScanDetail,
@@ -98,6 +102,44 @@ export async function graphqlExplore(body: {
   first?: number
 }): Promise<Record<string, unknown>> {
   return fetchJson('/graphql/explore', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function introspectSchema(
+  scanId: string,
+): Promise<IntrospectSchemaResponse> {
+  return fetchJson(`/scans/${scanId}/graphql/introspect`)
+}
+
+export async function introspectTypeFields(
+  scanId: string,
+  typeName: string,
+): Promise<IntrospectTypeResponse> {
+  return fetchJson(`/scans/${scanId}/graphql/introspect/${typeName}`)
+}
+
+export async function graphqlMutate(body: {
+  scan_id: string
+  object_name: string
+  operation: 'create' | 'delete'
+  fields?: Record<string, string>
+  record_id?: string | null
+}): Promise<GraphQLMutationResult> {
+  return fetchJson('/graphql/mutate', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function graphqlWriteTest(body: {
+  scan_id: string
+  object_name: string
+  test_field?: string
+  test_value?: string
+}): Promise<GraphQLWriteTestResult> {
+  return fetchJson('/graphql/write-test', {
     method: 'POST',
     body: JSON.stringify(body),
   })

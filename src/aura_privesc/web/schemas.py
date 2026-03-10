@@ -128,3 +128,22 @@ class GraphQLExploreRequest(BaseModel):
     relationship: str
     fields: list[str]
     first: int = 10
+
+
+class GraphQLMutationRequest(BaseModel):
+    """Request body for POST /api/graphql/mutate."""
+
+    scan_id: str
+    object_name: str
+    operation: str  # "create" or "delete"
+    fields: dict[str, str] = {}
+    record_id: str | None = None
+
+
+class GraphQLWriteTestRequest(BaseModel):
+    """Request body for POST /api/graphql/write-test."""
+
+    scan_id: str
+    object_name: str
+    test_field: str = "Name"
+    test_value: str = "aura-privesc-test"

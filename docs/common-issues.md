@@ -95,6 +95,10 @@ When updating Aura protocol details (action ID, params, encoding), update ALL of
 - [ ] `graphql.py:_build_relationship_query()` — relationship traversal queries
 - [ ] `proof.py:_graphql_params()` / `_build_count_query()` / `_build_fields_query()` — duplicated for proof generation
 - [ ] `proof.py:_build_record_query()` / `_build_filtered_record_query()` — duplicated for proof generation
+- [ ] `graphql.py:_build_schema_query()` / `_build_type_query()` — __schema/__type introspection queries
+- [ ] `graphql.py:_build_create_mutation()` / `_build_delete_mutation()` — UIAPI mutation queries
+- [ ] `proof.py:_build_schema_query()` / `_build_type_query()` — duplicated for proof generation
+- [ ] `proof.py:_build_create_mutation()` / `_build_delete_mutation()` — duplicated for proof generation
 - [ ] `output/html_output.py:_build_graphql_table()` — Count button onclick handler
 - [ ] `frontend/src/lib/curl.ts:buildFireAuraCurl()` — TypeScript curl generation in React UI
 
