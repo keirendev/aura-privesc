@@ -27,6 +27,7 @@ class Scan(Base):
     phase_detail = Column(Text, default="")
     result_json = Column(Text, default=None)
     error = Column(Text, default=None)
+    log_text = Column(Text, default=None)
     summary_json = Column(Text, default=None)
     started_at = Column(Text, default=None)
     finished_at = Column(Text, default=None)

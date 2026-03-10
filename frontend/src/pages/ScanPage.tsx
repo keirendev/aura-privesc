@@ -7,7 +7,7 @@ import ObjectsTable from '../components/results/ObjectsTable'
 import ApexTable from '../components/results/ApexTable'
 import GraphQLTable from '../components/results/GraphQLTable'
 import Badge from '../components/shared/Badge'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 export default function ScanPage() {
   const { id } = useParams<{ id: string }>()
@@ -67,6 +67,7 @@ export default function ScanPage() {
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
             {scanDetail.error}
           </p>
+          {scanDetail.logs && <ScanLogs logs={scanDetail.logs} defaultOpen={true} />}
         </div>
       )}
 
@@ -140,7 +141,38 @@ export default function ScanPage() {
               </div>
             </div>
           )}
+
+          {/* Logs for completed scans */}
+          {scanDetail.logs && <ScanLogs logs={scanDetail.logs} />}
         </>
+      )}
+    </div>
+  )
+}
+
+function ScanLogs({ logs, defaultOpen = false }: { logs: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div className="mt-4">
+      <button
+        onClick={() => setOpen(!open)}
+        className="text-xs cursor-pointer"
+        style={{ color: 'var(--cyan)' }}
+      >
+        {open ? 'Hide' : 'Show'} scan logs ({logs.split('\n').filter(Boolean).length} lines)
+      </button>
+      {open && (
+        <pre
+          className="mt-2 p-3 rounded text-xs overflow-x-auto max-h-96 overflow-y-auto"
+          style={{
+            background: 'var(--bg)',
+            color: 'var(--muted)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          {logs}
+        </pre>
       )}
     </div>
   )
