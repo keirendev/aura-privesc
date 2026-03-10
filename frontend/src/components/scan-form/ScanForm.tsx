@@ -7,12 +7,17 @@ import PresetSelector from './PresetSelector'
 import AdvancedOptions from './AdvancedOptions'
 import { Play } from 'lucide-react'
 
-export default function ScanForm() {
+interface ScanFormProps {
+  initialUrl?: string
+  initialOptions?: Omit<ScanCreateRequest, 'url'>
+}
+
+export default function ScanForm({ initialUrl, initialOptions }: ScanFormProps = {}) {
   const navigate = useNavigate()
   const createScan = useCreateScan()
-  const [url, setUrl] = useState('')
+  const [url, setUrl] = useState(initialUrl || '')
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
-  const [options, setOptions] = useState<Omit<ScanCreateRequest, 'url'>>({})
+  const [options, setOptions] = useState<Omit<ScanCreateRequest, 'url'>>(initialOptions || {})
 
   const handlePreset = (preset: PresetConfig) => {
     setSelectedPreset(preset.id)
