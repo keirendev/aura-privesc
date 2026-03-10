@@ -1,9 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 
-export function useTheme() {
+interface ThemeContextValue {
+  isDark: boolean
+  toggle: () => void
+}
+
+export const ThemeContext = createContext<ThemeContextValue>({
+  isDark: true,
+  toggle: () => {},
+})
+
+export function useThemeProvider() {
   const [isDark, setIsDark] = useState(() => {
     const stored = localStorage.getItem('theme')
-    return stored ? stored === 'dark' : true // dark by default
+    return stored ? stored === 'dark' : true
   })
 
   useEffect(() => {
@@ -13,4 +23,8 @@ export function useTheme() {
   const toggle = useCallback(() => setIsDark(d => !d), [])
 
   return { isDark, toggle }
+}
+
+export function useTheme() {
+  return useContext(ThemeContext)
 }
