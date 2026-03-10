@@ -6,6 +6,69 @@ from pydantic import BaseModel, field_validator
 from urllib.parse import urlparse
 
 
+class ReconCreate(BaseModel):
+    """Request body for POST /api/recons."""
+
+    instance_url: str
+    alias: str
+    access_token: str
+    skip_objects: bool = False
+    skip_apex: bool = False
+
+    @field_validator("instance_url")
+    @classmethod
+    def validate_instance_url(cls, v: str) -> str:
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("Instance URL must use http or https scheme")
+        if not parsed.hostname:
+            raise ValueError("Instance URL must have a hostname")
+        return v
+
+
+class ReconStatus(BaseModel):
+    """Lightweight response for GET /api/recons/{id}/status."""
+
+    id: str
+    status: str
+    phase: str
+    phase_detail: str
+    error: str | None = None
+
+
+class ReconSummary(BaseModel):
+    """Response item for GET /api/recons (list)."""
+
+    id: str
+    instance_url: str
+    alias: str | None = None
+    status: str
+    username: str | None = None
+    object_count: int | None = None
+    apex_count: int | None = None
+    created_at: str
+    finished_at: str | None = None
+
+
+class ReconDetail(BaseModel):
+    """Full response for GET /api/recons/{id}."""
+
+    id: str
+    instance_url: str
+    alias: str | None = None
+    status: str
+    phase: str
+    phase_detail: str
+    username: str | None = None
+    objects: list[str] | None = None
+    apex: list[str] | None = None
+    error: str | None = None
+    skip_objects: bool = False
+    skip_apex: bool = False
+    created_at: str
+    finished_at: str | None = None
+
+
 class ScanCreate(BaseModel):
     """Request body for POST /api/scans."""
 
@@ -16,6 +79,7 @@ class ScanCreate(BaseModel):
     manual_endpoint: str | None = None
     objects_list: list[str] | None = None
     apex_list: list[str] | None = None
+    recon_id: str | None = None
     skip_crud: bool = False
     skip_records: bool = False
     skip_apex: bool = False

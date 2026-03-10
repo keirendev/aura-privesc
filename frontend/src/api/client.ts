@@ -4,6 +4,10 @@ import type {
   GraphQLMutationResult,
   GraphQLWriteTestResult,
   PresetConfig,
+  ReconCreateRequest,
+  ReconDetail,
+  ReconStatus as ReconStatusType,
+  ReconSummary,
   ScanCreateRequest,
   ScanDetail,
   ScanStatus,
@@ -48,6 +52,10 @@ export async function getScan(id: string): Promise<ScanDetail> {
 
 export async function getScanStatus(id: string): Promise<ScanStatus> {
   return fetchJson(`/scans/${id}/status`)
+}
+
+export async function cancelScan(id: string): Promise<void> {
+  await fetchJson(`/scans/${id}/cancel`, { method: 'POST' })
 }
 
 export async function deleteScan(id: string): Promise<void> {
@@ -143,4 +151,37 @@ export async function graphqlWriteTest(body: {
     method: 'POST',
     body: JSON.stringify(body),
   })
+}
+
+// --- Recon ---
+
+export async function checkSfCli(): Promise<{ installed: boolean; path?: string; error?: string }> {
+  return fetchJson('/recons/check-cli')
+}
+
+export async function createRecon(body: ReconCreateRequest): Promise<ReconDetail> {
+  return fetchJson('/recons', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function listRecons(): Promise<ReconSummary[]> {
+  return fetchJson('/recons')
+}
+
+export async function getRecon(id: string): Promise<ReconDetail> {
+  return fetchJson(`/recons/${id}`)
+}
+
+export async function getReconStatus(id: string): Promise<ReconStatusType> {
+  return fetchJson(`/recons/${id}/status`)
+}
+
+export async function cancelRecon(id: string): Promise<void> {
+  await fetchJson(`/recons/${id}/cancel`, { method: 'POST' })
+}
+
+export async function deleteRecon(id: string): Promise<void> {
+  await fetchJson(`/recons/${id}`, { method: 'DELETE' })
 }

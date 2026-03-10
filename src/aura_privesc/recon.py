@@ -103,6 +103,66 @@ def sf_login(instance_url: str, alias: str | None = None) -> str:
     return username
 
 
+def sf_login_access_token(instance_url: str, access_token: str, alias: str | None = None) -> str:
+    """Authenticate using an access token (session ID) via SF_ACCESS_TOKEN env var.
+
+    Equivalent to: SF_ACCESS_TOKEN=<token> sf org login access-token -r <url> -a <alias> --no-prompt --json
+    """
+    cmd = [
+        "sf", "org", "login", "access-token",
+        "--instance-url", instance_url,
+        "--no-prompt",
+        "--json",
+    ]
+    if alias:
+        cmd.extend(["--alias", alias])
+
+    # Mask token in logs
+    token_preview = access_token[:10] + "..." if len(access_token) > 10 else "***"
+    logger.info("Running: %s (token: %s, %d chars)", " ".join(cmd), token_preview, len(access_token))
+
+    env = {**_SF_ENV, "SF_ACCESS_TOKEN": access_token}
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise ReconError("sf org login access-token timed out") from e
+
+    logger.debug("sf exit code: %d", proc.returncode)
+    if proc.stdout:
+        logger.debug("sf stdout: %s", proc.stdout[:1000])
+    if proc.stderr:
+        logger.debug("sf stderr: %s", proc.stderr[:1000])
+
+    if proc.returncode != 0:
+        # Try to extract a clean message from JSON error
+        msg = proc.stderr.strip() or proc.stdout.strip()
+        try:
+            err_data = json.loads(msg)
+            msg = err_data.get("message", msg)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        raise ReconError(f"sf org login access-token failed: {msg}")
+
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as e:
+        raise ReconError(f"Failed to parse sf login output: {e}") from e
+
+    username = data.get("result", {}).get("username")
+    if not username:
+        raise ReconError(f"No username in login response: {proc.stdout[:500]}")
+
+    logger.info("Authenticated as %s", username)
+    return username
+
+
 def enumerate_objects(target_org: str) -> list[str]:
     """List all sObject API names in the org via sf CLI."""
     cmd = [

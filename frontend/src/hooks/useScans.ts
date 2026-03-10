@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { listScans, createScan, deleteScan } from '../api/client'
+import { listScans, createScan, cancelScan, deleteScan } from '../api/client'
 import type { ScanCreateRequest, ScanSummary } from '../api/types'
 
 export function useScans() {
@@ -13,6 +13,16 @@ export function useCreateScan() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: ScanCreateRequest) => createScan(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scans'] })
+    },
+  })
+}
+
+export function useCancelScan() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => cancelScan(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scans'] })
     },

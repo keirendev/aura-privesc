@@ -13,8 +13,8 @@ from typing import Any
 from sqlalchemy import update
 
 from ..engine import ScanConfig, ScanEngine
-from ..exceptions import DiscoveryError
-from .db import Scan, get_session
+from ..exceptions import DiscoveryError, ReconError
+from .db import Recon, Scan, get_session
 
 logger = logging.getLogger(__name__)
 
@@ -87,16 +87,24 @@ def _build_summary(result_dict: dict) -> dict:
 
 
 class JobManager:
-    """Runs scan jobs as asyncio tasks within the FastAPI event loop."""
+    """Runs scan and recon jobs as asyncio tasks within the FastAPI event loop."""
 
     def __init__(self):
         self._tasks: dict[str, asyncio.Task] = {}
+        self._recon_tasks: dict[str, asyncio.Task] = {}
 
     @property
     def running_scan_id(self) -> str | None:
         for scan_id, task in self._tasks.items():
             if not task.done():
                 return scan_id
+        return None
+
+    @property
+    def running_recon_id(self) -> str | None:
+        for recon_id, task in self._recon_tasks.items():
+            if not task.done():
+                return recon_id
         return None
 
     async def start_scan(self, scan_id: str, config: ScanConfig) -> None:
@@ -212,9 +220,163 @@ class JobManager:
         except Exception:
             logger.error("Failed to update scan %s as failed", scan_id, exc_info=True)
 
-    def cancel(self, scan_id: str) -> bool:
+    async def cancel(self, scan_id: str) -> bool:
         task = self._tasks.get(scan_id)
         if task and not task.done():
             task.cancel()
+            finished = datetime.now(timezone.utc).isoformat()
+            try:
+                async with await get_session() as session:
+                    await session.execute(
+                        update(Scan)
+                        .where(Scan.id == scan_id)
+                        .values(
+                            status="failed",
+                            error="Cancelled by user",
+                            finished_at=finished,
+                        )
+                    )
+                    await session.commit()
+            except Exception:
+                logger.error("Failed to update cancelled scan %s", scan_id, exc_info=True)
+            return True
+        return False
+
+    # --- Recon jobs ---
+
+    async def start_recon(
+        self,
+        recon_id: str,
+        instance_url: str,
+        alias: str,
+        access_token: str,
+        skip_objects: bool,
+        skip_apex: bool,
+    ) -> None:
+        task = asyncio.create_task(
+            self._run_recon(recon_id, instance_url, alias, access_token, skip_objects, skip_apex)
+        )
+        self._recon_tasks[recon_id] = task
+
+    async def _run_recon(
+        self,
+        recon_id: str,
+        instance_url: str,
+        alias: str,
+        access_token: str,
+        skip_objects: bool,
+        skip_apex: bool,
+    ) -> None:
+        from ..recon import check_sf_cli, sf_login_access_token, enumerate_objects, enumerate_aura_methods
+
+        loop = asyncio.get_event_loop()
+        now = datetime.now(timezone.utc).isoformat()
+
+        async with await get_session() as session:
+            await session.execute(
+                update(Recon)
+                .where(Recon.id == recon_id)
+                .values(status="running", phase="sf_check", phase_detail="Checking sf CLI...")
+            )
+            await session.commit()
+
+        try:
+            # Phase 1: sf CLI check
+            await loop.run_in_executor(None, check_sf_cli)
+
+            # Phase 2: login via access token
+            await self._update_recon_phase(recon_id, "login", "Authenticating with access token...")
+            username = await loop.run_in_executor(
+                None, sf_login_access_token, instance_url, access_token, alias,
+            )
+
+            await self._update_recon_phase(recon_id, "login", f"Logged in as {username}", username=username)
+
+            target_org = alias
+
+            # Phase 3: objects
+            objects: list[str] = []
+            if not skip_objects:
+                await self._update_recon_phase(recon_id, "objects", "Enumerating sObjects...")
+                objects = await loop.run_in_executor(None, enumerate_objects, target_org)
+                await self._update_recon_phase(recon_id, "objects", f"Found {len(objects)} objects")
+
+            # Phase 4: apex
+            apex: list[str] = []
+            if not skip_apex:
+                await self._update_recon_phase(recon_id, "apex", "Enumerating @AuraEnabled methods...")
+                apex = await loop.run_in_executor(None, enumerate_aura_methods, target_org)
+                await self._update_recon_phase(recon_id, "apex", f"Found {len(apex)} methods")
+
+            # Phase 5: complete
+            finished = datetime.now(timezone.utc).isoformat()
+            async with await get_session() as session:
+                await session.execute(
+                    update(Recon)
+                    .where(Recon.id == recon_id)
+                    .values(
+                        status="completed",
+                        phase="complete",
+                        phase_detail="Recon complete",
+                        objects_json=json.dumps(objects) if objects else None,
+                        apex_json=json.dumps(apex) if apex else None,
+                        finished_at=finished,
+                    )
+                )
+                await session.commit()
+
+        except (ReconError, Exception) as e:
+            logger.error("Recon %s failed: %s", recon_id, e, exc_info=True)
+            finished = datetime.now(timezone.utc).isoformat()
+            try:
+                async with await get_session() as session:
+                    await session.execute(
+                        update(Recon)
+                        .where(Recon.id == recon_id)
+                        .values(
+                            status="failed",
+                            error=f"{type(e).__name__}: {e}",
+                            finished_at=finished,
+                        )
+                    )
+                    await session.commit()
+            except Exception:
+                logger.error("Failed to update recon %s as failed", recon_id, exc_info=True)
+
+    async def _update_recon_phase(
+        self, recon_id: str, phase: str, detail: str, username: str | None = None,
+    ) -> None:
+        try:
+            values: dict[str, Any] = {"phase": phase, "phase_detail": detail}
+            if username is not None:
+                values["username"] = username
+            async with await get_session() as session:
+                await session.execute(
+                    update(Recon).where(Recon.id == recon_id).values(**values)
+                )
+                await session.commit()
+        except Exception:
+            logger.debug("Failed to update recon phase", exc_info=True)
+
+    async def cancel_recon(self, recon_id: str) -> bool:
+        task = self._recon_tasks.get(recon_id)
+        if task and not task.done():
+            task.cancel()
+            # Mark as failed in DB so it doesn't stay "running" forever
+            finished = datetime.now(timezone.utc).isoformat()
+            try:
+                async with await get_session() as session:
+                    await session.execute(
+                        update(Recon)
+                        .where(Recon.id == recon_id)
+                        .values(
+                            status="failed",
+                            error="Cancelled by user",
+                            finished_at=finished,
+                        )
+                    )
+                    await session.commit()
+            except Exception:
+                logger.error("Failed to update cancelled recon %s", recon_id, exc_info=True)
             return True
         return False
