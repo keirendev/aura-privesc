@@ -11,7 +11,8 @@ export default function AdvancedOptions({
   values: FormData
   onChange: (vals: FormData) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const hasValues = !!(values.sid || values.token || values.objects_list || values.apex_list || values.proxy || values.insecure)
+  const [open, setOpen] = useState(hasValues)
 
   const toggle = (key: keyof FormData) => {
     onChange({ ...values, [key]: !values[key] })
@@ -19,6 +20,15 @@ export default function AdvancedOptions({
 
   const setField = (key: keyof FormData, val: unknown) => {
     onChange({ ...values, [key]: val })
+  }
+
+  const parseLines = (text: string): string[] | null => {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    return lines.length > 0 ? lines : null
+  }
+
+  const linesToText = (lines: string[] | null | undefined): string => {
+    return lines?.join('\n') || ''
   }
 
   return (
@@ -64,6 +74,40 @@ export default function AdvancedOptions({
                   className="w-full mt-1 px-2 py-1.5 rounded text-sm"
                   style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
                   placeholder="Optional"
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* Recon Input — custom objects and apex methods */}
+          <div className="space-y-2">
+            <h4 className="text-sm font-medium" style={{ color: 'var(--cyan)' }}>
+              Custom Object &amp; Apex Lists
+            </h4>
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>
+              Paste output from <code>aura-privesc recon</code> or add your own. One per line, # comments ignored.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-xs" style={{ color: 'var(--muted)' }}>
+                Object API names
+                <textarea
+                  value={linesToText(values.objects_list)}
+                  onChange={(e) => setField('objects_list', parseLines(e.target.value))}
+                  rows={4}
+                  className="w-full mt-1 px-2 py-1.5 rounded text-xs font-mono"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', resize: 'vertical' }}
+                  placeholder={"Account\nContact\nCustomObject__c"}
+                />
+              </label>
+              <label className="text-xs" style={{ color: 'var(--muted)' }}>
+                Apex controller.method pairs
+                <textarea
+                  value={linesToText(values.apex_list)}
+                  onChange={(e) => setField('apex_list', parseLines(e.target.value))}
+                  rows={4}
+                  className="w-full mt-1 px-2 py-1.5 rounded text-xs font-mono"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', resize: 'vertical' }}
+                  placeholder={"MyController.getRecords\nAdminCtrl.doAction"}
                 />
               </label>
             </div>
