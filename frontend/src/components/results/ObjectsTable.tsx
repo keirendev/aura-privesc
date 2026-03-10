@@ -1,10 +1,9 @@
 import { useState, useMemo } from 'react'
 import type { ObjectResult, ScanResult } from '../../api/types'
-import { getObjectRecords } from '../../api/client'
 import { CrudCell, ReadableIcon } from '../shared/CrudIndicator'
 import SearchInput from '../shared/SearchInput'
 import CopyButton from '../shared/CopyButton'
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { buildFireAuraCurl } from '../../lib/curl'
 
 const DESCRIPTORS = {
@@ -135,53 +134,6 @@ export default function ObjectsTable({
   )
 }
 
-function RecordsTable({ records }: { records: Record<string, unknown>[] }) {
-  const fields = useMemo(() => {
-    const seen = new Set<string>()
-    const result: string[] = []
-    for (const rec of records) {
-      for (const key of Object.keys(rec)) {
-        if (!seen.has(key)) {
-          seen.add(key)
-          result.push(key)
-        }
-      }
-    }
-    return result
-  }, [records])
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr style={{ background: 'var(--border)' }}>
-            {fields.map((f) => (
-              <th key={f} className="text-left px-2 py-1 whitespace-nowrap" style={{ color: 'var(--cyan)' }}>
-                {f}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {records.map((rec, i) => (
-            <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-              {fields.map((f) => (
-                <td
-                  key={f}
-                  className="px-2 py-1 max-w-[200px] truncate"
-                  title={String(rec[f] ?? '')}
-                >
-                  {String(rec[f] ?? '')}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 function ExpandableObjectRow({
   obj,
   expanded,
@@ -196,9 +148,6 @@ function ExpandableObjectRow({
   scanId: string
 }) {
   const [activeCurl, setActiveCurl] = useState<CurlTab>('info')
-  const [records, setRecords] = useState<Record<string, unknown>[] | null>(null)
-  const [recordsLoading, setRecordsLoading] = useState(false)
-  const [recordsError, setRecordsError] = useState<string | null>(null)
   const count = obj.record_count != null ? obj.record_count.toString() : '-'
 
   const curls: Record<CurlTab, string> = {
@@ -242,20 +191,7 @@ function ExpandableObjectRow({
     }
   }
 
-  const handleFetchRecords = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (recordsLoading) return
-    setRecordsLoading(true)
-    setRecordsError(null)
-    try {
-      const data = await getObjectRecords(scanId, obj.name)
-      setRecords(data.records)
-    } catch (err) {
-      setRecordsError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setRecordsLoading(false)
-    }
-  }
+  const recordsUrl = `/scan/${scanId}/records/aura/${obj.name}`
 
   const buttons: { tab: CurlTab; label: string; color: string; show: boolean }[] = [
     { tab: 'info', label: 'getObjectInfo', color: 'var(--cyan)', show: true },
@@ -301,37 +237,17 @@ function ExpandableObjectRow({
                 </button>
               ))}
               <span className="mx-1" style={{ borderLeft: '1px solid var(--border)' }} />
-              <button
-                onClick={handleFetchRecords}
-                disabled={recordsLoading}
-                className="px-3 py-1 rounded text-xs font-semibold cursor-pointer inline-flex items-center gap-1"
-                style={{
-                  background: records ? 'var(--purple)' : 'var(--border)',
-                  color: records ? '#fff' : 'var(--text)',
-                  opacity: recordsLoading ? 0.6 : 1,
-                }}
+              <a
+                href={recordsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="px-3 py-1 rounded text-xs font-semibold cursor-pointer inline-flex items-center gap-1 no-underline"
+                style={{ background: 'var(--border)', color: 'var(--text)' }}
               >
-                {recordsLoading && <Loader2 size={12} className="animate-spin" />}
-                {records ? `Records (${records.length})` : 'Fetch Records'}
-              </button>
+                View Records <ExternalLink size={11} />
+              </a>
             </div>
-
-            {/* Records display */}
-            {recordsError && (
-              <div className="mb-3 p-2 rounded text-xs" style={{ background: 'var(--card)', color: 'var(--red, #ef4444)' }}>
-                {recordsError}
-              </div>
-            )}
-            {records && records.length > 0 && (
-              <div className="mb-3">
-                <RecordsTable records={records} />
-              </div>
-            )}
-            {records && records.length === 0 && (
-              <div className="mb-3 text-xs" style={{ color: 'var(--muted)' }}>
-                No records returned.
-              </div>
-            )}
 
             {/* Active curl display */}
             <div>

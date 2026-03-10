@@ -50,6 +50,13 @@ export async function deleteScan(id: string): Promise<void> {
   await fetchJson(`/scans/${id}`, { method: 'DELETE' })
 }
 
+export async function getObjectFields(
+  scanId: string,
+  objectName: string,
+): Promise<{ object_name: string; fields: { name: string; data_type: string }[] }> {
+  return fetchJson(`/scans/${scanId}/fields/${objectName}`)
+}
+
 export async function getObjectRecords(
   scanId: string,
   objectName: string,

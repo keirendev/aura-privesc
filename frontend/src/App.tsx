@@ -5,6 +5,7 @@ import DashboardPage from './pages/DashboardPage'
 import NewScanPage from './pages/NewScanPage'
 import ScanPage from './pages/ScanPage'
 import ScanHistoryPage from './pages/ScanHistoryPage'
+import RecordsPage from './pages/RecordsPage'
 
 export default function App() {
   const theme = useThemeProvider()
@@ -17,6 +18,7 @@ export default function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/scan/new" element={<NewScanPage />} />
             <Route path="/scan/:id" element={<ScanPage />} />
+            <Route path="/scan/:id/records/:source/:objectName" element={<RecordsPage />} />
             <Route path="/history" element={<ScanHistoryPage />} />
           </Routes>
         </AppShell>

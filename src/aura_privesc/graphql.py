@@ -55,13 +55,14 @@ def _build_count_query(object_names: list[str]) -> str:
 def _build_fields_query(object_names: list[str]) -> str:
     """Build an objectInfos introspection query for field names/types.
 
-    ``ObjectInfo`` has no ``apiName`` selection field and doesn't support
-    object-name sub-selections.  We use GraphQL **aliases** so each object
-    gets its own ``objectInfos`` call within a single request, and the alias
-    key tells us which result belongs to which object.
+    NOTE: The UIAPI GraphQL ``objectInfos`` endpoint does not expose field API
+    names — only ``label`` and ``dataType``.  ``get_graphql_fields`` therefore
+    uses the Aura ``getObjectInfo`` action instead, which returns a dict of
+    fields keyed by API name.  This helper is kept only for proof-curl
+    generation.
     """
     aliases = " ".join(
-        f'{name}:objectInfos(apiNames:["{name}"]){{fields{{dataType}}}}'
+        f'{name}:objectInfos(apiNames:["{name}"]){{fields{{label dataType}}}}'
         for name in object_names
     )
     return f"query getFields{{uiapi{{{aliases}}}}}"
@@ -182,65 +183,49 @@ async def _get_single_count(client: AuraClient, object_name: str) -> int | None:
 async def get_graphql_fields(
     client: AuraClient,
     object_names: list[str],
-    batch_size: int = 25,
+    batch_size: int = 10,
 ) -> dict[str, list[GraphQLFieldInfo]]:
-    """Introspect field names/types via objectInfos using aliased queries."""
-    descriptor = DESCRIPTORS["executeGraphQL"]
+    """Introspect field names/types via Aura getObjectInfo.
+
+    The UIAPI GraphQL ``objectInfos`` endpoint does not expose field API names
+    (only ``label``), so we use the Aura ``getObjectInfo`` action instead.
+    Each call returns a dict of fields keyed by API name.
+    """
+    import asyncio as _asyncio
+
+    descriptor = DESCRIPTORS["getObjectInfo"]
     results: dict[str, list[GraphQLFieldInfo]] = {}
 
     for i in range(0, len(object_names), batch_size):
         batch = object_names[i : i + batch_size]
-        query = _build_fields_query(batch)
-        params = _graphql_params(query)
+        tasks = [
+            client.request(descriptor, {"objectApiName": name})
+            for name in batch
+        ]
+        responses = await _asyncio.gather(*tasks, return_exceptions=True)
 
-        try:
-            resp = await client.request(descriptor, params)
-        except Exception:
-            logger.debug("GraphQL fields batch failed", exc_info=True)
-            for name in batch:
+        for name, resp in zip(batch, responses):
+            if isinstance(resp, Exception):
+                logger.debug("getObjectInfo failed for %s: %s", name, resp)
                 results[name] = []
-            continue
+                continue
 
-        actions = resp.get("actions", [])
-        if not actions or actions[0].get("state") != "SUCCESS":
-            for name in batch:
+            actions = resp.get("actions", [])
+            if not actions or actions[0].get("state") != "SUCCESS":
                 results[name] = []
-            continue
-
-        rv = actions[0].get("returnValue", {})
-        uiapi = rv.get("data", {}).get("uiapi", {})
-
-        # With aliased queries, each key in uiapi is an object name whose
-        # value is the objectInfos result (list or single ObjectInfo).
-        # Fall back to the legacy objectInfos key if present.
-        found_names: set[str] = set()
-        for api_name in batch:
-            info_raw = uiapi.get(api_name)
-            if info_raw is None:
                 continue
-            # Alias value may be a list (take first) or a single object
-            info = info_raw[0] if isinstance(info_raw, list) and info_raw else info_raw
-            if not isinstance(info, dict):
-                continue
-            fields_data = info.get("fields", {})
+
+            rv = actions[0].get("returnValue", {})
+            if "objectInfos" in rv:
+                rv = next(iter(rv["objectInfos"].values()), rv)
+
+            fields_data = rv.get("fields", {})
             field_list: list[GraphQLFieldInfo] = []
             if isinstance(fields_data, dict):
                 for fname, finfo in fields_data.items():
                     dtype = finfo.get("dataType", "") if isinstance(finfo, dict) else ""
                     field_list.append(GraphQLFieldInfo(name=fname, data_type=dtype))
-            elif isinstance(fields_data, list):
-                for f in fields_data:
-                    fname = f.get("apiName") or f.get("ApiName", "")
-                    dtype = f.get("dataType") or f.get("DataType", "")
-                    if fname:
-                        field_list.append(GraphQLFieldInfo(name=fname, data_type=dtype))
-            results[api_name] = field_list
-            found_names.add(api_name)
-
-        # Mark missing objects
-        for name in batch:
-            if name not in found_names:
-                results.setdefault(name, [])
+            results[name] = field_list
 
     return results
 
@@ -305,7 +290,8 @@ def _build_record_query(
     for f in fields:
         _validate_api_name(f)
 
-    field_nodes = " ".join(f"{f}{{value}}" for f in fields)
+    # Id is a scalar leaf in UIAPI GraphQL; all other fields are value objects
+    field_nodes = " ".join(f if f == "Id" else f"{f}{{value}}" for f in fields)
     args = f"first:{first}"
     if after:
         escaped = after.replace("\\", "\\\\").replace('"', '\\"')
@@ -329,7 +315,7 @@ def _build_filtered_query(
     for f in fields:
         _validate_api_name(f)
 
-    field_nodes = " ".join(f"{f}{{value}}" for f in fields)
+    field_nodes = " ".join(f if f == "Id" else f"{f}{{value}}" for f in fields)
 
     where_parts = []
     for field_name, conditions in where.items():
@@ -362,7 +348,7 @@ def _build_relationship_query(
     for f in fields:
         _validate_api_name(f)
 
-    field_nodes = " ".join(f"{f}{{value}}" for f in fields)
+    field_nodes = " ".join(f if f == "Id" else f"{f}{{value}}" for f in fields)
 
     return (
         f"query getRelated{{uiapi{{query{{{object_name}(first:1)"
@@ -392,7 +378,10 @@ def _parse_record_page(resp: dict, object_name: str) -> GraphQLRecordPage:
         for key, val in node.items():
             if isinstance(val, dict) and "value" in val:
                 record[key] = val["value"]
-            elif isinstance(val, dict) and "edges" in val:
+            elif not isinstance(val, dict):
+                # Scalar leaf (e.g. Id)
+                record[key] = val
+            elif "edges" in val:
                 sub_records = []
                 for sub_edge in val.get("edges", []):
                     sub_node = sub_edge.get("node", {})
@@ -418,6 +407,36 @@ def _parse_record_page(resp: dict, object_name: str) -> GraphQLRecordPage:
     )
 
 
+def _extract_bad_fields(resp: dict) -> set[str]:
+    """Extract field names from FieldUndefined / SubselectionNotAllowed errors.
+
+    Error paths look like ``uiapi/query/Object/edges/node/FieldName`` or
+    ``uiapi/query/Object/edges/node/FieldName/value``.  We extract the field
+    name that sits directly under ``node/``.
+    """
+    import re
+    bad: set[str] = set()
+    rv = resp.get("actions", [{}])[0].get("returnValue", {})
+    for err in rv.get("errors", []):
+        # Use the path to find the field under node/
+        path = ""
+        for loc_key in ("paths", "path"):
+            paths = err.get(loc_key, [])
+            if paths:
+                path = paths[0] if isinstance(paths[0], str) else "/".join(paths)
+                break
+        if not path:
+            # Fall back to the @[...] in the message
+            m = re.search(r"@\[([^\]]+)\]", err.get("message", ""))
+            if m:
+                path = m.group(1)
+        # Extract field name right after .../node/
+        m = re.search(r"/node/(\w+)", path)
+        if m:
+            bad.add(m.group(1))
+    return bad
+
+
 async def get_graphql_records(
     client: AuraClient,
     object_name: str,
@@ -425,20 +444,39 @@ async def get_graphql_records(
     *,
     first: int = 10,
     after: str | None = None,
+    max_retries: int = 3,
 ) -> GraphQLRecordPage:
-    """Fetch records for an object with cursor pagination."""
+    """Fetch records for an object with cursor pagination.
+
+    If the query fails with FieldUndefined errors, the invalid fields are
+    removed and the query is retried automatically.
+    """
     _validate_api_name(object_name)
     descriptor = DESCRIPTORS["executeGraphQL"]
-    query = _build_record_query(object_name, fields, first=first, after=after)
-    params = _graphql_params(query)
+    remaining = list(fields)
 
-    try:
-        resp = await client.request(descriptor, params)
-    except Exception:
-        logger.debug("GraphQL record fetch failed for %s", object_name, exc_info=True)
-        return GraphQLRecordPage(object_name=object_name)
+    for attempt in range(max_retries + 1):
+        if not remaining:
+            return GraphQLRecordPage(object_name=object_name)
 
-    return _parse_record_page(resp, object_name)
+        query = _build_record_query(object_name, remaining, first=first, after=after)
+        params = _graphql_params(query)
+
+        try:
+            resp = await client.request(descriptor, params)
+        except Exception:
+            logger.debug("GraphQL record fetch failed for %s", object_name, exc_info=True)
+            return GraphQLRecordPage(object_name=object_name)
+
+        bad_fields = _extract_bad_fields(resp)
+        if bad_fields and attempt < max_retries:
+            logger.debug("Retrying %s without fields: %s", object_name, bad_fields)
+            remaining = [f for f in remaining if f not in bad_fields]
+            continue
+
+        return _parse_record_page(resp, object_name)
+
+    return GraphQLRecordPage(object_name=object_name)
 
 
 async def get_graphql_filtered_records(
