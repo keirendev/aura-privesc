@@ -4,7 +4,7 @@ import { CrudCell, ReadableIcon } from '../shared/CrudIndicator'
 import SearchInput from '../shared/SearchInput'
 import CopyButton from '../shared/CopyButton'
 import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
-import { buildFireAuraCurl } from '../../lib/curl'
+import { buildFireAuraCurl, type CurlOptions } from '../../lib/curl'
 
 const DESCRIPTORS = {
   getObjectInfo: 'aura://RecordUiController/ACTION$getObjectInfo',
@@ -24,10 +24,12 @@ export default function ObjectsTable({
   objects,
   scanResult,
   scanId,
+  curlOptions,
 }: {
   objects: ObjectResult[]
   scanResult: ScanResult
   scanId: string
+  curlOptions?: CurlOptions
 }) {
   const [search, setSearch] = useState('')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -124,6 +126,7 @@ export default function ObjectsTable({
                   onToggle={() => toggleExpand(obj.name)}
                   scanResult={scanResult}
                   scanId={scanId}
+                  curlOptions={curlOptions}
                 />
               )
             })}
@@ -140,12 +143,14 @@ function ExpandableObjectRow({
   onToggle,
   scanResult,
   scanId,
+  curlOptions,
 }: {
   obj: ObjectResult
   expanded: boolean
   onToggle: () => void
   scanResult: ScanResult
   scanId: string
+  curlOptions?: CurlOptions
 }) {
   const [activeCurl, setActiveCurl] = useState<CurlTab>('info')
   const count = obj.record_count != null ? obj.record_count.toString() : '-'
@@ -153,7 +158,7 @@ function ExpandableObjectRow({
   const curls: Record<CurlTab, string> = {
     info: obj.proof || buildFireAuraCurl(scanResult, DESCRIPTORS.getObjectInfo, {
       objectApiName: obj.name,
-    }),
+    }, curlOptions),
     items: obj.proof_records || buildFireAuraCurl(scanResult, DESCRIPTORS.getItems, {
       entityNameOrId: obj.name,
       layoutType: 'FULL',
@@ -162,23 +167,23 @@ function ExpandableObjectRow({
       useTimeout: false,
       getCount: false,
       enableRowActions: false,
-    }),
+    }, curlOptions),
     create: buildFireAuraCurl(scanResult, DESCRIPTORS.createRecord, {
       record: {
         apiName: obj.name,
         fields: { Name: 'TestRecord' },
       },
-    }),
+    }, curlOptions),
     update: buildFireAuraCurl(scanResult, DESCRIPTORS.updateRecord, {
       record: {
         apiName: obj.name,
         id: '<RECORD_ID>',
         fields: { Name: 'UpdatedValue' },
       },
-    }),
+    }, curlOptions),
     delete: buildFireAuraCurl(scanResult, DESCRIPTORS.deleteRecord, {
       recordId: '<RECORD_ID>',
-    }),
+    }, curlOptions),
   }
 
   const handleActionClick = async (tab: CurlTab, e: React.MouseEvent) => {
