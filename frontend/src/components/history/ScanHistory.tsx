@@ -1,12 +1,13 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useScans, useDeleteScan } from '../../hooks/useScans'
 import Badge from '../shared/Badge'
-import { Trash2, ExternalLink } from 'lucide-react'
+import { Trash2, ExternalLink, RotateCw } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function ScanHistory() {
   const { data: scans, isLoading } = useScans()
   const deleteScan = useDeleteScan()
+  const navigate = useNavigate()
 
   if (isLoading) {
     return <p style={{ color: 'var(--muted)' }}>Loading...</p>
@@ -18,6 +19,20 @@ export default function ScanHistory() {
         No scans yet. <Link to="/scan/new" style={{ color: 'var(--cyan)' }}>Start one</Link>.
       </p>
     )
+  }
+
+  const handleRescan = async (scan: { id: string; url: string }, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      const detail = await (await fetch(`/api/scans/${scan.id}`)).json()
+      navigate('/scan/new', {
+        state: { url: scan.url, config: detail.config || {} },
+      })
+    } catch {
+      // Fall back to just URL if detail fetch fails
+      navigate('/scan/new', { state: { url: scan.url, config: {} } })
+    }
   }
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -76,13 +91,24 @@ export default function ScanHistory() {
                 </td>
                 <td className="text-center px-3 py-2">
                   <div className="flex items-center justify-center gap-2">
-                    <Link to={`/scan/${scan.id}`} style={{ color: 'var(--cyan)' }}>
+                    <Link to={`/scan/${scan.id}`} style={{ color: 'var(--cyan)' }} title="View">
                       <ExternalLink size={14} />
                     </Link>
                     <button
+                      type="button"
+                      onClick={(e) => handleRescan(scan, e)}
+                      className="cursor-pointer"
+                      style={{ color: 'var(--green)' }}
+                      title="Re-scan with settings"
+                    >
+                      <RotateCw size={14} />
+                    </button>
+                    <button
+                      type="button"
                       onClick={(e) => handleDelete(scan.id, e)}
                       className="cursor-pointer"
                       style={{ color: 'var(--red)' }}
+                      title="Delete"
                     >
                       <Trash2 size={14} />
                     </button>

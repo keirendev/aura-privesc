@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useJob } from '../hooks/useJob'
 import { useScanResult } from '../hooks/useScanResult'
 import ScanProgress from '../components/progress/ScanProgress'
@@ -7,10 +7,12 @@ import ObjectsTable from '../components/results/ObjectsTable'
 import ApexTable from '../components/results/ApexTable'
 import GraphQLTable from '../components/results/GraphQLTable'
 import Badge from '../components/shared/Badge'
+import { RotateCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 export default function ScanPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { data: status } = useJob(id)
   const { data: scanDetail, refetch } = useScanResult(id)
 
@@ -42,7 +44,22 @@ export default function ScanPage() {
             </p>
           )}
         </div>
-        {status && <Badge value={status.status} type="status" />}
+        <div className="flex items-center gap-3">
+          {status && <Badge value={status.status} type="status" />}
+          {(isComplete || isFailed) && scanDetail && (
+            <button
+              type="button"
+              onClick={() => navigate('/scan/new', {
+                state: { url: scanDetail.url, config: scanDetail.config || {} },
+              })}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium cursor-pointer"
+              style={{ background: 'var(--bg)', color: 'var(--cyan)', border: '1px solid var(--border)' }}
+            >
+              <RotateCw size={12} />
+              Re-scan
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Progress while running */}
