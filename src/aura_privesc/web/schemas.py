@@ -82,6 +82,7 @@ class ScanDetail(BaseModel):
     phase_detail: str
     result: dict | None = None
     error: str | None = None
+    logs: str | None = None
     summary: dict | None = None
     started_at: str | None = None
     finished_at: str | None = None

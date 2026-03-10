@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,6 +19,14 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Configure logging for aura_privesc modules so scan debug output is visible
+    aura_logger = logging.getLogger("aura_privesc")
+    if not aura_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        aura_logger.addHandler(handler)
+    aura_logger.setLevel(logging.DEBUG)
+
     # Startup: initialize database
     await get_engine()
     yield

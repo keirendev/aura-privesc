@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import traceback
@@ -16,6 +17,25 @@ from ..exceptions import DiscoveryError
 from .db import Scan, get_session
 
 logger = logging.getLogger(__name__)
+
+
+class _ScanLogCapture(logging.Handler):
+    """Captures log records from aura_privesc.* into a StringIO buffer."""
+
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.buffer = io.StringIO()
+        self.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            self.buffer.write(msg + "\n")
+        except Exception:
+            pass
+
+    def get_text(self) -> str:
+        return self.buffer.getvalue()
 
 
 def _strip_records(result_dict: dict) -> dict:
@@ -79,6 +99,11 @@ class JobManager:
 
     async def _run_scan(self, scan_id: str, config: ScanConfig) -> None:
         now = datetime.now(timezone.utc).isoformat()
+
+        # Capture logs for this scan
+        log_capture = _ScanLogCapture()
+        aura_logger = logging.getLogger("aura_privesc")
+        aura_logger.addHandler(log_capture)
 
         # Update status to running
         async with await get_session() as session:
@@ -148,18 +173,22 @@ class JobManager:
                         phase_detail="Scan complete",
                         result_json=json.dumps(stripped),
                         summary_json=json.dumps(summary),
+                        log_text=log_capture.get_text(),
                         finished_at=finished,
                     )
                 )
                 await session.commit()
 
         except DiscoveryError as e:
-            await self._fail_scan(scan_id, f"Discovery failed: {e}")
+            logger.error("Scan %s discovery failed: %s", scan_id, e)
+            await self._fail_scan(scan_id, f"Discovery failed: {e}", log_capture.get_text())
         except Exception as e:
             logger.error("Scan %s failed: %s", scan_id, e, exc_info=True)
-            await self._fail_scan(scan_id, f"{type(e).__name__}: {e}")
+            await self._fail_scan(scan_id, f"{type(e).__name__}: {e}", log_capture.get_text())
+        finally:
+            aura_logger.removeHandler(log_capture)
 
-    async def _fail_scan(self, scan_id: str, error: str) -> None:
+    async def _fail_scan(self, scan_id: str, error: str, log_text: str = "") -> None:
         finished = datetime.now(timezone.utc).isoformat()
         try:
             async with await get_session() as session:
@@ -169,6 +198,7 @@ class JobManager:
                     .values(
                         status="failed",
                         error=error,
+                        log_text=log_text or None,
                         finished_at=finished,
                     )
                 )

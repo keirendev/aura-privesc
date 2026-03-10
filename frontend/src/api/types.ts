@@ -37,6 +37,7 @@ export interface ScanDetail {
   phase_detail: string
   result: ScanResult | null
   error: string | null
+  logs: string | null
   summary: ScanSummaryStats | null
   started_at: string | null
   finished_at: string | null

@@ -186,6 +186,7 @@ async def get_scan(scan_id: str) -> ScanDetail:
         phase_detail=scan.phase_detail or "",
         result=json.loads(scan.result_json) if scan.result_json else None,
         error=scan.error,
+        logs=scan.log_text,
         summary=json.loads(scan.summary_json) if scan.summary_json else None,
         started_at=scan.started_at,
         finished_at=scan.finished_at,
