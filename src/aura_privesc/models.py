@@ -109,6 +109,24 @@ class GraphQLRecordPage(BaseModel):
     total_count: int | None = None
 
 
+class GraphQLMutationResult(BaseModel):
+    """Result of a single GraphQL mutation (create or delete)."""
+
+    operation: str
+    success: bool = False
+    record_id: str | None = None
+    error: str | None = None
+    proof: str | None = None
+
+
+class GraphQLWriteTestResult(BaseModel):
+    """Result of a create-then-delete write test via GraphQL."""
+
+    object_name: str
+    create: GraphQLMutationResult | None = None
+    delete: GraphQLMutationResult | None = None
+
+
 class UserInfo(BaseModel):
     user_id: str | None = None
     username: str | None = None

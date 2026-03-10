@@ -10,15 +10,15 @@
 | `cli.py` | Click CLI: `scan`, `recon`, and `serve` commands |
 | `client.py` | `AuraClient` — async HTTP client implementing the Aura protocol envelope |
 | `config.py` | Constants: `DESCRIPTORS`, `ENDPOINT_PATHS`, `STANDARD_OBJECTS` |
-| `models.py` | Pydantic models: `ScanResult`, `ObjectResult`, `ApexResult`, `GraphQLRecordPage`, etc. |
+| `models.py` | Pydantic models: `ScanResult`, `ObjectResult`, `ApexResult`, `GraphQLRecordPage`, `GraphQLMutationResult`, `GraphQLWriteTestResult`, etc. |
 | `discovery.py` | Phase 1: endpoint probing, fwuid/context/app extraction from HTML |
 | `permissions.py` | Phase 2: user identification, SOQL capability check, config object discovery |
 | `enumerator.py` | Phase 3: `getObjectInfo` for CRUD metadata, `getItems` for records |
 | `validator.py` | Phase 3 (cont.): re-validates findings to filter false positives |
 | `apex.py` | Phase 4: discovers controllers from JS, tests via `call_apex` |
 | `crud.py` | Record-level CRUD operations + automated write testing (`auto_crud_test_objects`) |
-| `graphql.py` | Phase 5: GraphQL enumeration — record counts, field introspection, record fetching with pagination, filtered queries, relationship traversal |
-| `proof.py` | Generates reproducible curl commands for findings (including GraphQL record/filtered proofs) |
+| `graphql.py` | Phase 5: GraphQL enumeration — record counts, field introspection, record fetching with pagination, filtered queries, relationship traversal. Interactive: `__schema`/`__type` introspection, create/delete mutations, write testing |
+| `proof.py` | Generates reproducible curl commands for findings (including GraphQL record/filtered/introspection/mutation proofs) |
 | `recon.py` | SF CLI recon subcommand: enumerate objects and `@AuraEnabled` Apex methods via Tooling API |
 | `exceptions.py` | `AuraRequestError`, `ClientOutOfSyncError`, `InvalidSessionError`, `DiscoveryError` |
 
@@ -35,7 +35,7 @@
 | File | Purpose |
 |------|---------|
 | `app.py` | FastAPI app factory, static file serving, SPA catch-all |
-| `api.py` | REST API endpoints (scans CRUD, presets, live GraphQL) |
+| `api.py` | REST API endpoints (scans CRUD, presets, live GraphQL, introspection, mutations) |
 | `db.py` | SQLAlchemy models + async SQLite session |
 | `jobs.py` | `JobManager` — runs scans as asyncio tasks, updates DB with progress |
 | `schemas.py` | Pydantic request/response schemas for the REST API |
@@ -87,6 +87,13 @@ Phase 5: GraphQL Enumeration (graphql.py)
     ├─ Filtered queries with where clauses (get_graphql_filtered_records)
     └─ Relationship traversal (get_graphql_relationships)
 
+Interactive (web UI only, not part of automatic scan):
+    ├─ __schema introspection (introspect_schema) — discover queryable objects
+    ├─ __type introspection (introspect_type_fields) — discover fields of a type
+    ├─ GraphQL create mutation (graphql_create_record)
+    ├─ GraphQL delete mutation (graphql_delete_record)
+    └─ GraphQL write test (graphql_write_test) — create then delete to prove access
+
 Phase 6: Reporting (output/)
     ├─ Rich terminal tables
     ├─ JSON (--json)
@@ -133,6 +140,8 @@ Object names are validated against `_SAFE_API_NAME` regex before interpolation i
 - **Ephemeral record data** — `sample_records` and `record_data` stripped before SQLite persistence
 - **Polling** — React frontend polls `/api/scans/{id}/status` every 2s during active scans
 - **Live GraphQL** — completed scan credentials can be used for interactive GraphQL queries via `/api/graphql/*`
+- **Introspection** — `__schema`/`__type` queries via `/api/scans/{id}/graphql/introspect[/{type}]`
+- **Mutations** — GraphQL create/delete via `/api/graphql/mutate` and write testing via `/api/graphql/write-test`
 
 ### Data flow
 

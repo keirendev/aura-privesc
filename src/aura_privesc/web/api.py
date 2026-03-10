@@ -15,7 +15,9 @@ from .jobs import JobManager
 from .schemas import (
     GraphQLExploreRequest,
     GraphQLFilteredRequest,
+    GraphQLMutationRequest,
     GraphQLRecordsRequest,
+    GraphQLWriteTestRequest,
     PresetConfig,
     ScanCreate,
     ScanDetail,
@@ -387,6 +389,92 @@ async def graphql_explore(body: GraphQLExploreRequest) -> dict:
             first=body.first,
         )
         return page.model_dump()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        await client.close()
+
+
+# --- GraphQL introspection endpoints ---
+
+
+@router.get("/scans/{scan_id}/graphql/introspect")
+async def graphql_introspect_schema(scan_id: str) -> dict:
+    """Discover queryable objects via __schema introspection."""
+    from ..graphql import introspect_schema
+    from ..proof import proof_for_graphql_introspection
+
+    client = await _get_scan_client(scan_id)
+    try:
+        objects = await introspect_schema(client)
+        proof = proof_for_graphql_introspection(client)
+        return {"objects": objects, "proof": proof}
+    finally:
+        await client.close()
+
+
+@router.get("/scans/{scan_id}/graphql/introspect/{type_name}")
+async def graphql_introspect_type(scan_id: str, type_name: str) -> dict:
+    """Discover fields of a type via __type introspection."""
+    import re
+    if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*(__[a-zA-Z]+)?$', type_name):
+        raise HTTPException(400, "Invalid type name")
+
+    from ..graphql import introspect_type_fields
+    from ..proof import proof_for_graphql_type_introspection
+
+    client = await _get_scan_client(scan_id)
+    try:
+        fields = await introspect_type_fields(client, type_name)
+        proof = proof_for_graphql_type_introspection(client, type_name)
+        return {
+            "type_name": type_name,
+            "fields": [{"name": f.name, "data_type": f.data_type} for f in fields],
+            "proof": proof,
+        }
+    finally:
+        await client.close()
+
+
+# --- GraphQL mutation endpoints ---
+
+
+@router.post("/graphql/mutate")
+async def graphql_mutate(body: GraphQLMutationRequest) -> dict:
+    """Execute a single GraphQL mutation (create or delete)."""
+    from ..graphql import graphql_create_record, graphql_delete_record
+
+    if body.operation not in ("create", "delete"):
+        raise HTTPException(400, "operation must be 'create' or 'delete'")
+
+    client = await _get_scan_client(body.scan_id)
+    try:
+        if body.operation == "create":
+            if not body.fields:
+                raise HTTPException(400, "fields required for create operation")
+            result = await graphql_create_record(client, body.object_name, body.fields)
+        else:
+            if not body.record_id:
+                raise HTTPException(400, "record_id required for delete operation")
+            result = await graphql_delete_record(client, body.object_name, body.record_id)
+        return result.model_dump()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        await client.close()
+
+
+@router.post("/graphql/write-test")
+async def graphql_write_test_endpoint(body: GraphQLWriteTestRequest) -> dict:
+    """Create then delete a record to prove write access via GraphQL."""
+    from ..graphql import graphql_write_test
+
+    client = await _get_scan_client(body.scan_id)
+    try:
+        result = await graphql_write_test(
+            client, body.object_name, body.test_field, body.test_value
+        )
+        return result.model_dump()
     except ValueError as e:
         raise HTTPException(400, str(e))
     finally:
