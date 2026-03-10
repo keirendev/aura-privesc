@@ -20,8 +20,8 @@
 | `graphql.py` | Phase 5: GraphQL enumeration — record counts, field introspection, record fetching with pagination, filtered queries, relationship traversal. Interactive: `__schema`/`__type` introspection, create/delete mutations, write testing |
 | `proof.py` | Generates reproducible curl commands for findings (including GraphQL record/filtered/introspection/mutation proofs) |
 | `rest_api.py` | Phase 2 (cont.): REST API "API Enabled" detection — probes `/services/data/` endpoints on the CRM domain with a clean httpx client (no Aura headers). Checks: API versions, SOQL query, sObject describe, Tooling API, Bulk API, org limits. Auto-derives CRM domain from Experience Cloud URL or uses user-specified `--crm-domain` |
-| `recon.py` | SF CLI recon subcommand: enumerate objects and `@AuraEnabled` Apex methods via Tooling API |
-| `exceptions.py` | `AuraRequestError`, `ClientOutOfSyncError`, `InvalidSessionError`, `DiscoveryError` |
+| `recon.py` | SF CLI recon: enumerate objects and `@AuraEnabled` Apex methods via Tooling API. Supports browser OAuth (`sf_login`) and access-token auth (`sf_login_access_token` via `SF_ACCESS_TOKEN` env var) |
+| `exceptions.py` | `AuraRequestError`, `ClientOutOfSyncError`, `InvalidSessionError`, `DiscoveryError`, `ReconError` |
 
 ### Output modules (`src/aura_privesc/output/`)
 
@@ -36,10 +36,10 @@
 | File | Purpose |
 |------|---------|
 | `app.py` | FastAPI app factory, static file serving, SPA catch-all |
-| `api.py` | REST API endpoints (scans CRUD, presets, live GraphQL, introspection, mutations) |
-| `db.py` | SQLAlchemy models + async SQLite session |
-| `jobs.py` | `JobManager` — runs scans as asyncio tasks, updates DB with progress |
-| `schemas.py` | Pydantic request/response schemas for the REST API |
+| `api.py` | REST API endpoints (scans CRUD, recons CRUD, presets, live GraphQL, introspection, mutations) |
+| `db.py` | SQLAlchemy models (`Scan`, `Recon`) + async SQLite session |
+| `jobs.py` | `JobManager` — runs scan and recon jobs as asyncio tasks, updates DB with progress, supports cancellation |
+| `schemas.py` | Pydantic request/response schemas for scans and recons |
 | `static/` | Built React app (populated by `cd frontend && npm run build`) |
 
 ### Frontend (`frontend/`)
@@ -49,14 +49,14 @@ React + Vite + TypeScript + Tailwind CSS dashboard.
 | Directory | Purpose |
 |-----------|---------|
 | `src/api/` | API client (`client.ts`) and TypeScript types (`types.ts`) |
-| `src/hooks/` | React Query hooks: `useJob`, `useScanResult`, `useScans`, `useTheme` |
+| `src/hooks/` | React Query hooks: `useJob`, `useScanResult`, `useScans`, `useRecons`, `useTheme` |
 | `src/components/layout/` | `AppShell`, `Sidebar`, `ThemeToggle` |
 | `src/components/scan-form/` | `ScanForm`, `PresetSelector`, `AdvancedOptions` |
 | `src/components/progress/` | `ScanProgress`, `PhaseIndicator` |
 | `src/components/results/` | `ExecutiveSummary`, `ObjectsTable`, `ApexTable`, `GraphQLTable`, `RestApiTable` |
 | `src/components/history/` | `ScanHistory` |
 | `src/components/shared/` | `Badge`, `CrudIndicator`, `CopyButton`, `SearchInput` |
-| `src/pages/` | `DashboardPage`, `NewScanPage`, `ScanPage`, `ScanHistoryPage` |
+| `src/pages/` | `DashboardPage`, `NewScanPage`, `ScanPage`, `ScanHistoryPage`, `ReconPage` |
 | `src/lib/` | `curl.ts` (port of `fireAura()` from html_output.py) |
 
 ## Scan Phases
@@ -140,10 +140,12 @@ Object names are validated against `_SAFE_API_NAME` regex before interpolation i
 ### Web UI architecture
 
 - **FastAPI** backend serves REST API at `/api/*` and the built React SPA
-- **SQLite** stores scan history at `~/.aura-privesc/scans.db` (0600 permissions)
-- **Single scan at a time** enforced at API layer (409 Conflict)
+- **SQLite** stores scan and recon history at `~/.aura-privesc/scans.db` (0600 permissions)
+- **Single scan/recon at a time** enforced at API layer (409 Conflict)
+- **Cancel support** — `POST /api/scans/{id}/cancel` and `POST /api/recons/{id}/cancel` stop running jobs and mark them as failed
 - **Ephemeral record data** — `sample_records` and `record_data` stripped before SQLite persistence
-- **Polling** — React frontend polls `/api/scans/{id}/status` every 2s during active scans
+- **Polling** — React frontend polls `/api/scans/{id}/status` and `/api/recons/{id}/status` every 2s during active jobs
+- **SFDX Recon** — authenticates via `sf org login access-token` (session ID passed as `SF_ACCESS_TOKEN` env var), enumerates objects and @AuraEnabled methods, stores results in DB. Completed recons can be selected in the scan form to populate objects/apex lists
 - **Live GraphQL** — completed scan credentials can be used for interactive GraphQL queries via `/api/graphql/*`
 - **Introspection** — `__schema`/`__type` queries via `/api/scans/{id}/graphql/introspect[/{type}]`
 - **Mutations** — GraphQL create/delete via `/api/graphql/mutate` and write testing via `/api/graphql/write-test`
@@ -153,6 +155,8 @@ Object names are validated against `_SAFE_API_NAME` regex before interpolation i
 ```
 CLI:     ScanConfig → ScanEngine → ScanResult → output renderers
 Web UI:  POST /api/scans → JobManager → ScanEngine → DB → GET /api/scans/{id}
+Recon:   POST /api/recons → JobManager → sf CLI subprocesses → DB → GET /api/recons/{id}
+                                                                └→ scan form (recon_id → objects/apex lists)
 
 AuraClient → enumerator/apex → ObjectResult/ApexResult → ScanResult
                                       ↑
